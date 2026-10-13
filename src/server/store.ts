@@ -4,6 +4,7 @@ import { setAccountOn, validateAccount, validateBasedOn } from '../account-rules
 import { dayHash } from '../day-hash.js'
 import { assertTimeZone, localStamp, validateBefore, validateDay, validateLimit } from '../day-rules.js'
 import { contributeTo, emptyDay, wantsMedia } from '../day.js'
+import { clearOwed, owedOf, type Owed } from '../forget.js'
 import { checkBatch, itemMediaOf, validateKey } from '../item-rules.js'
 import { removeFrom, removedOf, restoreIn } from '../removal.js'
 import { agentDayOf, dayRow, dayView } from '../views.js'
@@ -48,6 +49,49 @@ export function createJourneyStore<M extends string>(host: JourneyHost<M>) {
     try { await run(); return true } catch (err) { failed(what, err); return false }
   }
   const NOT_FORGOTTEN = 'Removed, but search could not be updated. Try again.'
+
+  // What one call learned from asking search to forget: which debts search confirmed (`items`,
+  // `account`), and which it could not (`failedItems`, `accountFailed`).
+  interface Paid { items: Set<string>; account: boolean; failedItems: Set<string>; accountFailed: boolean }
+  const NOTHING_PAID: Paid = { items: new Set(), account: false, failedItems: new Set(), accountFailed: false }
+
+  /**
+   * Asks search to forget everything a day owes, waits, and strikes off what search confirmed.
+   * A debt is written into the day by the same write that hid or stripped something, so it
+   * outlives a search that is down: every later call that writes the day runs this first, and
+   * again for what its own write added. `skip` is what this same call already asked and was
+   * refused, so one call asks once. Whatever was just forgotten and is still on the day is then
+   * indexed again as it now stands, which is the only way an item that owed a forget gets back in.
+   */
+  async function pay(day: string, owed: Owed, skip: Paid = NOTHING_PAID): Promise<Paid> {
+    const out: Paid = { items: new Set(), account: false, failedItems: new Set(skip.failedItems), accountFailed: skip.accountFailed }
+    const done: Owed = { items: [], account: null }
+    for (const o of owed.items) {
+      if (out.failedItems.has(o.key)) continue
+      if (await settle('forget item', () => host.forget?.item(day, o.key))) { out.items.add(o.key); done.items.push(o) } else out.failedItems.add(o.key)
+    }
+    if (owed.account !== null && !out.accountFailed) {
+      if (await settle('forget day', () => host.forget?.day?.(day))) { out.account = true; done.account = owed.account } else out.accountFailed = true
+    }
+    if (done.items.length === 0 && done.account === null) return out
+    const ref = days().doc(day)
+    const rec = await host.db().runTransaction(async (tx) => {
+      const doc = await tx.get(ref)
+      if (!doc.exists) return null
+      const had = doc.data() as DayRecord<M>
+      const next = clearOwed(had, done)
+      if (next !== had) tx.set(ref, { ...next })
+      return next
+    })
+    if (!rec) return out
+    for (const o of done.items) {
+      const item = Object.hasOwn(rec.items, o.key) ? rec.items[o.key] : undefined
+      if (item && !item.removed && item.owesForget === undefined) quietly('index item', () => host.index?.item(day, o.key))
+    }
+    if (done.account !== null && rec.account && !rec.accountWithheld && rec.accountOwesForget === undefined) quietly('index day', () => host.index?.day(day))
+    return out
+  }
+  const stillOwes = (owed: Owed, paid: Paid, key: string) => owed.items.some((o) => o.key === key) && !paid.items.has(key)
 
   const UNREADABLE = 'that upload could not be read'
 
@@ -98,6 +142,7 @@ export function createJourneyStore<M extends string>(host: JourneyHost<M>) {
     // by nothing, which costs storage and shows nowhere.
     const seen = await ref.get()
     const before = seen.exists ? (seen.data() as DayRecord<M>) : emptyDay<M>(day, nowIso())
+    const first = await pay(day, owedOf(before))
     const filedAt: (ItemMedia | undefined)[] = []
     const whyAt: (string | undefined)[] = []
     for (const [i, c] of checked.entries()) {
@@ -116,70 +161,99 @@ export function createJourneyStore<M extends string>(host: JourneyHost<M>) {
       const doc = await tx.get(ref)
       let rec = doc.exists ? (doc.data() as DayRecord<M>) : emptyDay<M>(day, now)
       const results: ContributeResult[] = []
-      const touched: { key: string; narrowed: boolean; at: number }[] = []
+      const touched: { key: string; at: number }[] = []
+      const narrowedAt: number[] = []
+      let dirty = false
       for (const [i, c] of checked.entries()) {
         if (!c.item || whyAt[i] !== undefined) { results.push({ index: i, key: c.key, status: 'invalid', reason: whyAt[i] ?? 'refused' }); continue }
         const step = contributeTo(rec, m, c.item, filedAt[i], now)
+        if (step.rec !== rec) dirty = true
         rec = step.rec
         results.push({ index: i, ...step.result })
-        if (step.changed) touched.push({ key: step.changed, narrowed: step.narrowed, at: results.length - 1 })
+        if (step.changed) touched.push({ key: step.changed, at: i })
+        if (step.narrowed && step.changed) narrowedAt.push(i)
       }
-      if (touched.length) tx.set(ref, { ...rec })
-      return { results, touched, hash: dayHash(rec.items) }
+      if (dirty) tx.set(ref, { ...rec })
+      return { results, touched, narrowedAt, owed: owedOf(rec), hash: dayHash(rec.items) }
     })
 
-    for (const t of out.touched) {
-      // Search may still hold what the merge just stripped, so it is not indexed again until it has forgotten.
-      if (t.narrowed && !(await settle('forget item', () => host.forget?.item(day, t.key)))) {
-        out.results[t.at] = { ...out.results[t.at], status: 'failed', reason: 'merged, but search could not be updated' }
-        continue
+    const paid = await pay(day, out.owed, first)
+    // A call that was just stripped is a receipt only once search has let go of what it lost.
+    // Until then the row says to send it again, and sending it again is what asks search again.
+    for (const i of out.narrowedAt) {
+      const key = out.touched.find((t) => t.at === i)!.key
+      if (stillOwes(out.owed, paid, key) || (out.owed.account !== null && !paid.account)) {
+        out.results[i] = { ...out.results[i], status: 'failed', reason: 'merged, but search could not be updated' }
       }
+    }
+    // Search never hears again of an item it still owes a forget for, and an item it just forgot
+    // was indexed again as part of paying that debt.
+    const told = new Set<string>()
+    for (const t of out.touched) {
+      if (told.has(t.key) || paid.items.has(t.key) || stillOwes(out.owed, paid, t.key)) continue
+      told.add(t.key)
       quietly('index item', () => host.index?.item(day, t.key))
     }
     return { day, hash: out.hash, results: out.results, refused: out.results.filter((r) => r.status === 'refused').map((r) => r.key) }
   }
 
+  // The day as it stands before a write, so what it already owes search is paid first.
+  async function payFirst(day: string): Promise<Paid> {
+    const seen = await days().doc(day).get()
+    return seen.exists ? pay(day, owedOf(seen.data() as DayRecord<M>)) : NOTHING_PAID
+  }
+
   /**
    * Either member removes any item. The item is hidden, never deleted, and search has forgotten it
-   * by the time this answers; if search cannot, this rejects with a 409 and the removal still
-   * stands. Removing what is already removed changes nothing and asks search to forget again, so
-   * a forget that failed the first time gets a second try.
+   * by the time this answers; if search cannot, this rejects with a 409 that carries
+   * `removed: true`, the removal still stands, and the forget stays owed on the day, where any
+   * later call that writes the day tries it again. Removing what is already removed changes
+   * nothing and asks search to forget again.
    */
   async function remove(m: M, dayRaw: unknown, keyRaw: unknown): Promise<{ day: string; key: string; removedCount: number }> {
     const day = validateDay(dayRaw)
     const key = validateKey(keyRaw)
     const ref = days().doc(day)
+    const first = await payFirst(day)
     const now = nowIso()
     const out = await host.db().runTransaction(async (tx) => {
       const doc = await tx.get(ref)
       if (!doc.exists) throw new RuleError('no such day', 404)
       const step = removeFrom(doc.data() as DayRecord<M>, m, key, now)
       if (step.changed) tx.set(ref, { ...step.rec })
-      return { key: step.key, hadAccount: step.hadAccount, removedCount: removedOf(step.rec).length }
+      return { key: step.key, hadAccount: step.hadAccount, removedCount: removedOf(step.rec).length, owed: owedOf(step.rec) }
     })
-    // The removal is saved. If search cannot forget, the caller is told so it tries again: a repeat
-    // removes nothing more and runs the forgets again.
-    const itemGone = await settle('forget item', () => host.forget?.item(day, out.key))
-    const dayGone = out.hadAccount ? await settle('forget day', () => host.forget?.day?.(day)) : true
-    if (!itemGone || !dayGone) throw new RuleError(NOT_FORGOTTEN, 409)
+    const second = await pay(day, out.owed, first)
+    // This removal answers for its own item and the day's account, not for what else the day owes.
+    // A debt this call already saw refused is not asked twice; an item that owes nothing (it was
+    // removed and forgotten before) is asked once more all the same.
+    const owesItem = out.owed.items.some((o) => o.key === out.key)
+    const itemGone = first.items.has(out.key) || second.items.has(out.key) || (!owesItem && await settle('forget item', () => host.forget?.item(day, out.key)))
+    const dayGone = !out.hadAccount || first.account || second.account || (out.owed.account === null && await settle('forget day', () => host.forget?.day?.(day)))
+    if (!itemGone || !dayGone) throw new RuleError(NOT_FORGOTTEN, 409, { removed: true })
     return { day, key: out.key, removedCount: out.removedCount }
   }
 
-  /** Either member puts a removed item back. `m` is who asked; nothing is recorded about a restore. */
+  /**
+   * Either member puts a removed item back. `m` is who asked; nothing is recorded about a restore.
+   * Search hears of the item again unless it still owes a forget for it; then it hears once that
+   * forget is confirmed.
+   */
   async function restore(m: M, dayRaw: unknown, keyRaw: unknown): Promise<{ day: string; key: string; removedCount: number }> {
     void m
     const day = validateDay(dayRaw)
     const key = validateKey(keyRaw)
     const ref = days().doc(day)
+    await payFirst(day)
     const now = nowIso()
     const out = await host.db().runTransaction(async (tx) => {
       const doc = await tx.get(ref)
       if (!doc.exists) throw new RuleError('no such day', 404)
       const step = restoreIn(doc.data() as DayRecord<M>, key, now)
       if (step.changed) tx.set(ref, { ...step.rec })
-      return { key: step.key, changed: step.changed, removedCount: removedOf(step.rec).length }
+      return { key: step.key, changed: step.changed, removedCount: removedOf(step.rec).length, owes: step.rec.items[step.key].owesForget !== undefined }
     })
-    if (out.changed) quietly('index item', () => host.index?.item(day, out.key))
+    if (out.changed && !out.owes) quietly('index item', () => host.index?.item(day, out.key))
     return { day, key: out.key, removedCount: out.removedCount }
   }
 
@@ -203,15 +277,17 @@ export function createJourneyStore<M extends string>(host: JourneyHost<M>) {
     const text = validateAccount(b.text)
     const basedOn = validateBasedOn(b.basedOn)
     const ref = days().doc(day)
+    await payFirst(day)
     const now = nowIso()
     const out = await host.db().runTransaction(async (tx) => {
       const doc = await tx.get(ref)
       if (!doc.exists) throw new RuleError('no such day', 404)
       const step = setAccountOn(doc.data() as DayRecord<M>, m, text, basedOn, now)
       tx.set(ref, { ...step.rec })
-      return { first: step.first, hash: basedOn }
+      return { first: step.first, hash: basedOn, owes: step.rec.accountOwesForget !== undefined }
     })
-    quietly('index day', () => host.index?.day(day))
+    // An account search still owes a forget for is indexed when that forget is confirmed.
+    if (!out.owes) quietly('index day', () => host.index?.day(day))
     // Waited for: on a serverless host a promise left running after the answer can be dropped, and
     // "first" is only ever true once, so a lost announcement is lost for good.
     if (out.first) await settle('announce dayWritten', () => host.announce.dayWritten(day, m))

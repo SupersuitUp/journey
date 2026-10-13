@@ -174,6 +174,69 @@ describe('a removed item is never taken back', () => {
   })
 })
 
+describe('what the others-present rule forbids never comes back through a removed call', () => {
+  const written = (rec: DayRecord<M>): DayRecord<M> => ({ ...rec, account: { text: 'Ada met.', by: 'ada', at: NOW, basedOn: 'x', firstAt: NOW } })
+  const full = () => contributeTo(start(), 'ada', call('conversations:a1', { summary: 'From Ada.' }), RECORDING, NOW).rec
+
+  it('the other machine saying others were present is still refused, and the removed call takes the narrowing', () => {
+    const rec = withRemoved(full(), 'conversations:a1')
+    const step = contributeTo(rec, 'bo', call('conversations:b7', { others: true, line: 'A client joined.' }), undefined, LATER)
+    expect(step.result).toEqual({ key: 'conversations:b7', status: 'refused', reason: REMOVED_REASON })
+    expect(step.changed).toBeNull()
+    expect(step.narrowed).toBe(true)
+    const item = step.rec.items['conversations:a1']
+    expect(item).toMatchObject({ title: 'Weekly sync', others: true, line: 'A client joined.', removed: { by: 'bo', at: LATER }, by: ['ada'], owesForget: LATER })
+    expect(item).not.toHaveProperty('summaries')
+    expect(item).not.toHaveProperty('media')
+    expect(item).not.toHaveProperty('aka')
+    expect(step.rec).not.toHaveProperty('accountOwesForget')
+    expect(JSON.stringify(step.rec)).not.toContain('From Ada.')
+    expect(JSON.stringify(step.rec)).not.toContain('p/video/v.mp4')
+  })
+
+  it('on a day that was written up, the account owes a forget too', () => {
+    const step = contributeTo(written(withRemoved(full(), 'conversations:a1')), 'bo', call('conversations:b7', { others: true }), undefined, LATER)
+    expect(step.rec.accountOwesForget).toBe(LATER)
+  })
+
+  it('the other order: a removed call with others present is not widened by the full one', () => {
+    const narrow = withRemoved(contributeTo(start(), 'bo', call('conversations:b7', { others: true, line: 'A client joined.' }), undefined, NOW).rec, 'conversations:b7')
+    const step = contributeTo(narrow, 'ada', call('conversations:a1', { summary: 'From Ada.' }), RECORDING, LATER)
+    expect(step.result.status).toBe('refused')
+    expect(step.rec).toBe(narrow)
+    expect(step.narrowed).toBe(false)
+  })
+
+  it('a refused twin that says nothing of others changes nothing', () => {
+    const rec = withRemoved(full(), 'conversations:a1')
+    const step = contributeTo(rec, 'bo', call('conversations:b7', { summary: 'From Bo.' }), undefined, LATER)
+    expect(step.rec).toBe(rec)
+    expect(step.narrowed).toBe(false)
+  })
+})
+
+describe('a narrowing merge owes search a forget', () => {
+  const full = () => contributeTo(start(), 'ada', call('conversations:a1', { summary: 'From Ada.' }), RECORDING, NOW).rec
+
+  it('marks the item, and the account when the day had one', () => {
+    const bare = contributeTo(full(), 'bo', call('conversations:b7', { others: true }), undefined, LATER).rec
+    expect(bare.items['conversations:a1'].owesForget).toBe(LATER)
+    expect(bare).not.toHaveProperty('accountOwesForget')
+    const written = { ...full(), account: { text: 'Ada met.', by: 'ada' as const, at: NOW, basedOn: 'x', firstAt: NOW } }
+    const narrow = contributeTo(written, 'bo', call('conversations:b7', { others: true }), undefined, LATER).rec
+    expect(narrow.items['conversations:a1'].owesForget).toBe(LATER)
+    expect(narrow.accountOwesForget).toBe(LATER)
+  })
+
+  it('a merge that strips nothing owes nothing', () => {
+    const plain = contributeTo(full(), 'bo', call('conversations:b7', { summary: 'From Bo.' }), undefined, LATER).rec
+    expect(plain.items['conversations:a1']).not.toHaveProperty('owesForget')
+    const already = contributeTo(start(), 'ada', call('conversations:a1', { others: true }), undefined, NOW).rec
+    const again = contributeTo(already, 'bo', call('conversations:b7', { others: true }), undefined, LATER).rec
+    expect(again.items['conversations:a1']).not.toHaveProperty('owesForget')
+  })
+})
+
 describe('a day has a size', () => {
   it('reports an item past the limit as invalid: sending it again as it is would change nothing', () => {
     const items: Record<string, Item<M>> = {}

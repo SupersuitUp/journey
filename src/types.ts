@@ -33,6 +33,9 @@ export interface Removal<M extends string = string> { by: M; at: string }
 // machine contributed it, first contributor first. `summaries` is a call's short summary, one per
 // contributor. `others` (always true when present) marks a call where someone else was there: a
 // title and one `line`, never a summary and never media. Nothing is ever deleted: `removed` hides.
+// `owesForget` is set when search may still hold what this item no longer shows (it was removed,
+// or it lost its summaries and recording), and stays until search confirms it has forgotten. Its
+// value is when the debt was taken, so a confirmation of an older debt never clears a newer one.
 export interface Item<M extends string = string> {
   key: string
   aka?: string[]
@@ -47,6 +50,7 @@ export interface Item<M extends string = string> {
   meetingKey?: string
   media?: ItemMedia
   removed?: Removal<M>
+  owesForget?: string
   addedAt: string
 }
 
@@ -57,12 +61,14 @@ export interface Account<M extends string = string> { text: string; by: M; at: s
 // One document per day, id YYYY-MM-DD. `accountStale` (always true when present) is set when an
 // item is removed or restored; `accountWithheld` (always true when present) is set when an item is
 // removed, and hides the account until it is written again without that item.
+// `accountOwesForget` is the account's own debt to search, kept the way an item's is.
 export interface DayRecord<M extends string = string> {
   day: string
   items: Record<string, Item<M>>
   account?: Account<M>
   accountStale?: true
   accountWithheld?: true
+  accountOwesForget?: string
   createdAt: string
   updatedAt: string
 }

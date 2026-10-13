@@ -27,20 +27,25 @@ const held = <M extends string>(rec: DayRecord<M>, key: string): Item<M> => {
  * Either member removes any item. Removing hides: the item stays in the record with who removed it
  * and when, every read leaves it out, and its key is refused if a machine sends it again. A day
  * that was already written up may tell of the item, so its account is withheld until rewritten.
+ * Search may hold the item and that account, so both are marked as owing a forget.
  */
 export function removeFrom<M extends string>(rec: DayRecord<M>, m: M, key: string, now: string): { rec: DayRecord<M>; key: string; changed: boolean; hadAccount: boolean } {
   const item = held(rec, key)
   const hadAccount = rec.account !== undefined
   if (item.removed) return { rec, key: item.key, changed: false, hadAccount }
-  const next: DayRecord<M> = { ...rec, items: { ...rec.items, [item.key]: { ...item, removed: { by: m, at: now } } }, updatedAt: now }
+  const next: DayRecord<M> = { ...rec, items: { ...rec.items, [item.key]: { ...item, removed: { by: m, at: now }, owesForget: now } }, updatedAt: now }
   if (hadAccount) {
     next.accountStale = true
     next.accountWithheld = true
+    next.accountOwesForget = now
   }
   return { rec: next, key: item.key, changed: true, hadAccount }
 }
 
-/** Puts a removed item back exactly as it was. The account is stale again, since there is more to tell. */
+/**
+ * Puts a removed item back as it was. The account is stale again, since there is more to tell. A
+ * forget the item still owes stays owed: search is asked to forget before it hears of the item again.
+ */
 export function restoreIn<M extends string>(rec: DayRecord<M>, key: string, now: string): { rec: DayRecord<M>; key: string; changed: boolean } {
   const item = held(rec, key)
   if (!item.removed) return { rec, key: item.key, changed: false }

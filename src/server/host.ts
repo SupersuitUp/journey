@@ -70,21 +70,25 @@ export interface JourneyHost<M extends string> {
   }
   /**
    * Search, adding. Called after the write is saved and NOT awaited: `item` after an item is
-   * added, merged or restored, `day` after an account is set. The app reads the day back and
-   * indexes what it finds. A throw or rejection goes to `log` and has no other effect, so back it
-   * with a pass of your own that indexes what a failed call missed.
+   * added, merged or restored, `day` after an account is set. The app reads the day back
+   * (`store.searchDay(day)`) and indexes what it finds. A throw or rejection goes to `log` and has
+   * no other effect, so back it with a pass of your own that indexes what a failed call missed.
+   * Neither is ever called for an item or an account that still owes a forget: it is called once
+   * that forget is confirmed.
    */
   index?: {
     item(day: string, key: string): void | Promise<void>
     day(day: string): void | Promise<void>
   }
   /**
-   * Search, the other way. AWAITED before the request answers: `item` when an item is removed (or
-   * a call turns out to have had other people present), `day` when a removal withholds an account
-   * that may tell of the item. A throw or rejection goes to `log` and the caller is told: a
-   * removal answers 409 ("Removed, but search could not be updated. Try again.") with the item
-   * still hidden, so a repeat of the same removal runs the forget again; a merge that narrowed an
-   * item reports that item `failed` and does not index it again in that call.
+   * Search, the other way. AWAITED before the request answers: `item` when an item is removed or
+   * a call turns out to have had other people present, `day` when either of those happens on a
+   * day that already had an account, since the account may tell of what was hidden or stripped.
+   * Make both safe to call twice. The debt is written into the day by the same write, so a throw
+   * or rejection (which goes to `log`) is not the end of it: the debt stays, and every later call
+   * that writes that day asks again until search confirms. The caller is told as well: a removal
+   * answers 409 with `removed: true` ("Removed, but search could not be updated. Try again.")
+   * with the item still hidden, and a merge that narrowed a call reports that row `failed`.
    */
   forget?: {
     item(day: string, key: string): void | Promise<void>

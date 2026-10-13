@@ -78,6 +78,16 @@ describe('removeFrom', () => {
     notFound(() => removeFrom(day(), 'bo', 'shipped:nope', LATER))
   })
 
+  it('marks the item as owing a forget, and the account too when the day had one', () => {
+    const bare = removeFrom(day(), 'bo', 'shipped:r1', LATER).rec
+    expect(bare.items['shipped:r1'].owesForget).toBe(LATER)
+    expect(bare).not.toHaveProperty('accountOwesForget')
+    expect(bare.items['camera-roll:p1']).not.toHaveProperty('owesForget')
+    const written = removeFrom(withAccount(day()), 'bo', 'shipped:r1', LATER).rec
+    expect(written.items['shipped:r1'].owesForget).toBe(LATER)
+    expect(written.accountOwesForget).toBe(LATER)
+  })
+
   it('marks a written account stale and withholds it, since it may tell of what was removed', () => {
     const out = removeFrom(withAccount(day()), 'bo', 'shipped:r1', LATER)
     expect(out.hadAccount).toBe(true)
@@ -121,7 +131,8 @@ describe('restoreIn', () => {
     const removed = removeFrom(before, 'bo', 'camera-roll:p1', LATER).rec
     const out = restoreIn(removed, 'camera-roll:p1', LATEST)
     expect(out.changed).toBe(true)
-    expect(out.rec.items['camera-roll:p1']).toEqual(before.items['camera-roll:p1'])
+    // As it was, and still marked: search was told to forget it and has not confirmed that yet.
+    expect(out.rec.items['camera-roll:p1']).toEqual({ ...before.items['camera-roll:p1'], owesForget: LATER })
     expect(out.rec.items['camera-roll:p1']).not.toHaveProperty('removed')
     expect(dayHash(out.rec.items)).toBe(dayHash(before.items))
   })
