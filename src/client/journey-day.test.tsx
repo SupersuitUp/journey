@@ -1,12 +1,18 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, render as renderBare, screen, waitFor, within } from '@testing-library/react'
+import type { ReactElement } from 'react'
 
 const { refresh } = vi.hoisted(() => ({ refresh: vi.fn() }))
 vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh }) }))
 
-import { JourneyDay, fromLine } from './journey-day.js'
-import { DEFAULT_THEME, setTheme } from './theme.js'
+import { JourneyDay } from './journey-day.js'
+import { JourneyProvider } from './provider.js'
+import type { ThemeTokens } from './theme.js'
 import type { DayView, ItemView, RemovedRow } from '../types.js'
+
+// Every screen is drawn the way an app draws it: inside the provider that says where things are.
+const render = (ui: ReactElement, theme?: Partial<ThemeTokens>) =>
+  renderBare(<JourneyProvider config={{ apiBase: '/api/journey', pageBase: '/journey' }} theme={theme}>{ui}</JourneyProvider>)
 
 const NAMES = { ada: 'Ada', bo: 'Bo' }
 const DAY = '2026-10-12'
@@ -55,15 +61,7 @@ const day = (v: DayView): Route => (url, method) => (method === 'GET' && url ===
 const removedList = (rows: RemovedRow[]): Route => (url, method) => (method === 'GET' && url === `${API}/removed` ? Response.json({ removed: rows }) : undefined)
 const item = (method: 'DELETE' | 'POST', status = 200): Route => (url, m) => (m === method && url.startsWith(`${API}/item?key=`) ? new Response('{}', { status }) : undefined)
 
-afterEach(() => { vi.unstubAllGlobals(); setTheme(DEFAULT_THEME) })
-
-describe('fromLine', () => {
-  it('names whose machine an item came from', () => {
-    expect(fromLine(['ada'], NAMES)).toBe('From Ada')
-    expect(fromLine(['ada', 'bo'], NAMES)).toBe('From Ada and Bo')
-    expect(fromLine(['cy'], NAMES)).toBe('From cy')
-  })
-})
+afterEach(() => { vi.unstubAllGlobals() })
 
 describe('JourneyDay', () => {
   it('opens with the date and the account, a paragraph at a time', () => {
@@ -225,8 +223,7 @@ describe('JourneyDay', () => {
   })
 
   it('draws in the colours the app set', () => {
-    setTheme({ ink: '#010203' })
-    render(<JourneyDay view={view()} names={NAMES} />)
+    render(<JourneyDay view={view()} names={NAMES} />, { ink: '#010203' })
     expect(screen.getByText('Weekly sync')).toHaveStyle({ color: 'rgb(1, 2, 3)' })
   })
 })

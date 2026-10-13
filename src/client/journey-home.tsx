@@ -3,9 +3,8 @@
 import Link from 'next/link'
 import { useState } from 'react'
 import type { DayRow, DaysPage } from '../types.js'
-import { clientConfig } from './config.js'
-import { formatDay } from './format-day.js'
-import { ACCENT, DANGER, HAIRLINE, INK, MUTED, SERIF } from './theme.js'
+import { formatDay } from '../format.js'
+import { useJourney } from './context.js'
 
 const countLine = (n: number) => `${n} ${n === 1 ? 'item' : 'items'}, not written up yet`
 
@@ -16,6 +15,7 @@ const countLine = (n: number) => `${n} ${n === 1 ? 'item' : 'items'}, not writte
 export function JourneyHome({ days, next, newDays = [], empty = 'Nothing here yet. A day appears once something from it is contributed.' }: {
   days: DayRow[]; next: string | null; newDays?: readonly string[]; empty?: string
 }) {
+  const { config, theme } = useJourney()
   const [rows, setRows] = useState(days)
   const [cursor, setCursor] = useState(next)
   const [busy, setBusy] = useState(false)
@@ -27,7 +27,7 @@ export function JourneyHome({ days, next, newDays = [], empty = 'Nothing here ye
     setBusy(true)
     setFailed(false)
     try {
-      const res = await fetch(`${clientConfig().apiBase}/days?before=${encodeURIComponent(cursor)}`)
+      const res = await fetch(`${config.apiBase}/days?before=${encodeURIComponent(cursor)}`)
       if (!res.ok) throw new Error('failed')
       const page = (await res.json()) as DaysPage
       setRows((had) => [...had, ...page.days])
@@ -40,23 +40,23 @@ export function JourneyHome({ days, next, newDays = [], empty = 'Nothing here ye
   }
 
   if (rows.length === 0 && !cursor) {
-    return <p className="px-6 py-12 text-center text-[17px]" style={{ color: MUTED, fontFamily: SERIF }}>{empty}</p>
+    return <p className="px-6 py-12 text-center text-[17px]" style={{ color: theme.muted, fontFamily: theme.serif }}>{empty}</p>
   }
   return (
     <div className="px-4">
       <ol>
         {rows.map((d) => (
-          <li key={d.day} className="border-b" style={{ borderColor: HAIRLINE }}>
-            <Link href={`${clientConfig().pageBase}/${d.day}`} prefetch={false} className="block py-4">
-              <p className="flex items-center gap-2 text-xs font-medium tracking-wide uppercase" style={{ color: MUTED }}>
+          <li key={d.day} className="border-b" style={{ borderColor: theme.hairline }}>
+            <Link href={`${config.pageBase}/${d.day}`} prefetch={false} className="block py-4">
+              <p className="flex items-center gap-2 text-xs font-medium tracking-wide uppercase" style={{ color: theme.muted }}>
                 <span>{formatDay(d.day, now)}</span>
-                {newDays.includes(d.day) && <span aria-label="New" role="img" className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: ACCENT }} />}
+                {newDays.includes(d.day) && <span aria-label="New" role="img" className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: theme.accent }} />}
               </p>
-              <p className="mt-1 text-[17px] leading-snug" style={{ color: INK, fontFamily: SERIF }}>{d.firstLine ?? countLine(d.count)}</p>
+              <p className="mt-1 text-[17px] leading-snug" style={{ color: theme.ink, fontFamily: theme.serif }}>{d.firstLine ?? countLine(d.count)}</p>
               {d.thumbs.length > 0 && (
                 <ul className="mt-3 grid grid-cols-4 gap-1.5">
                   {d.thumbs.map((src, i) => (
-                    <li key={i} className="aspect-square overflow-hidden rounded-xl" style={{ backgroundColor: HAIRLINE }}>
+                    <li key={i} className="aspect-square overflow-hidden rounded-xl" style={{ backgroundColor: theme.hairline }}>
                       {/* eslint-disable-next-line @next/next/no-img-element -- signed, expiring storage URL */}
                       <img src={src} alt="" className="h-full w-full object-cover" />
                     </li>
@@ -68,11 +68,11 @@ export function JourneyHome({ days, next, newDays = [], empty = 'Nothing here ye
         ))}
       </ol>
       {cursor && (
-        <button type="button" onClick={() => void more()} disabled={busy} className="mt-4 h-11 w-full rounded-xl text-base disabled:opacity-40" style={{ color: INK, border: `1px solid ${HAIRLINE}` }}>
+        <button type="button" onClick={() => void more()} disabled={busy} className="mt-4 h-11 w-full rounded-xl text-base disabled:opacity-40" style={{ color: theme.ink, border: `1px solid ${theme.hairline}` }}>
           {busy ? 'Loading' : 'Earlier days'}
         </button>
       )}
-      {failed && <p role="alert" className="mt-2 text-center text-sm" style={{ color: DANGER }}>Could not load earlier days. Try again.</p>}
+      {failed && <p role="alert" className="mt-2 text-center text-sm" style={{ color: theme.danger }}>Could not load earlier days. Try again.</p>}
     </div>
   )
 }

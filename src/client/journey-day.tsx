@@ -3,10 +3,9 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import type { DayView, GroupName, ItemKind, ItemView, MediaView, MemberNames, RemovedRow } from '../types.js'
-import { clientConfig } from './config.js'
-import { formatDay, formatWhen } from './format-day.js'
+import { formatDay, formatWhen, fromLine } from '../format.js'
+import { useJourney } from './context.js'
 import { Sheet } from './sheet.js'
-import { DANGER, HAIRLINE, INK, MUTED, SERIF } from './theme.js'
 
 const HEADINGS: Record<GroupName, string> = { calls: 'Calls', media: 'Photos and video', texts: 'Texts', shipped: 'Shipped' }
 const KIND_LABEL: Record<ItemKind, string> = { call: 'Call', photo: 'Photo', video: 'Video', text: 'Text', shipped: 'Shipped' }
@@ -16,12 +15,6 @@ const nameOf = (names: MemberNames, m: string) => names[m] ?? m
 const clip = (text: string, max = 40) => (text.length > max ? `${text.slice(0, max - 1).trimEnd()}…` : text)
 // What an item is called on its controls: its title, else its first words, else its kind.
 const labelOf = (item: { kind: ItemKind; title?: string; words?: string }) => item.title ?? (item.words ? clip(item.words) : KIND_LABEL[item.kind])
-
-/** Whose machine an item came from, in the names the app gave. */
-export function fromLine(by: readonly string[], names: MemberNames): string {
-  const who = by.map((m) => nameOf(names, m))
-  return `From ${who.length <= 2 ? who.join(' and ') : `${who.slice(0, -1).join(', ')} and ${who[who.length - 1]}`}`
-}
 
 function Media({ media, label }: { media: MediaView; label: string }) {
   if (media.kind === 'video' && media.videoUrl) {
@@ -35,36 +28,37 @@ function Media({ media, label }: { media: MediaView; label: string }) {
 function ItemRow({ item, names, busy, confirming, onAsk, onKeep, onRemove }: {
   item: ItemView<string>; names: MemberNames; busy: boolean; confirming: boolean; onAsk(): void; onKeep(): void; onRemove(): void
 }) {
+  const { theme } = useJourney()
   const label = labelOf(item)
   return (
-    <li className="border-b py-3" style={{ borderColor: HAIRLINE }}>
+    <li className="border-b py-3" style={{ borderColor: theme.hairline }}>
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
-          {item.title && <p className="text-[17px] leading-snug" style={{ color: INK, fontFamily: SERIF }}>{item.title}</p>}
-          {item.line && <p className="mt-1 text-[15px] leading-snug" style={{ color: INK }}>{item.line}</p>}
-          {item.words && <blockquote className="border-l-2 pl-3 text-[17px] leading-snug" style={{ color: INK, borderColor: HAIRLINE, fontFamily: SERIF }}>{item.words}</blockquote>}
+          {item.title && <p className="text-[17px] leading-snug" style={{ color: theme.ink, fontFamily: theme.serif }}>{item.title}</p>}
+          {item.line && <p className="mt-1 text-[15px] leading-snug" style={{ color: theme.ink }}>{item.line}</p>}
+          {item.words && <blockquote className="border-l-2 pl-3 text-[17px] leading-snug" style={{ color: theme.ink, borderColor: theme.hairline, fontFamily: theme.serif }}>{item.words}</blockquote>}
           {item.summaries.map((s) => (
-            <p key={s.by} className="mt-1 text-[15px] leading-snug" style={{ color: INK }}>
-              <span style={{ color: MUTED }}>{nameOf(names, s.by)}: </span>{s.text}
+            <p key={s.by} className="mt-1 text-[15px] leading-snug" style={{ color: theme.ink }}>
+              <span style={{ color: theme.muted }}>{nameOf(names, s.by)}: </span>{s.text}
             </p>
           ))}
           {item.media && <Media media={item.media} label={label} />}
-          <p className="mt-1 text-xs" style={{ color: MUTED }}>{`${fromLine(item.by, names)}${item.others ? ' · Others were present' : ''}`}</p>
+          <p className="mt-1 text-xs" style={{ color: theme.muted }}>{`${fromLine(item.by, names)}${item.others ? ' · Others were present' : ''}`}</p>
         </div>
         {confirming ? (
           <div className="flex shrink-0 flex-col items-end">
-            <p className="text-base" style={{ color: INK }}>Remove for everyone?</p>
+            <p className="text-base" style={{ color: theme.ink }}>Remove for everyone?</p>
             <div className="flex gap-1">
-              <button type="button" onClick={onRemove} disabled={busy} aria-label={`Confirm remove ${label}`} className="h-11 px-2 text-base underline disabled:opacity-40" style={{ color: DANGER }}>
+              <button type="button" onClick={onRemove} disabled={busy} aria-label={`Confirm remove ${label}`} className="h-11 px-2 text-base underline disabled:opacity-40" style={{ color: theme.danger }}>
                 Yes, remove
               </button>
-              <button type="button" onClick={onKeep} disabled={busy} aria-label={`Keep ${label}`} className="h-11 px-2 text-base underline disabled:opacity-40" style={{ color: MUTED }}>
+              <button type="button" onClick={onKeep} disabled={busy} aria-label={`Keep ${label}`} className="h-11 px-2 text-base underline disabled:opacity-40" style={{ color: theme.muted }}>
                 Keep
               </button>
             </div>
           </div>
         ) : (
-          <button type="button" onClick={onAsk} disabled={busy} aria-label={`Remove ${label}`} className="h-11 shrink-0 px-2 text-base underline disabled:opacity-40" style={{ color: MUTED }}>
+          <button type="button" onClick={onAsk} disabled={busy} aria-label={`Remove ${label}`} className="h-11 shrink-0 px-2 text-base underline disabled:opacity-40" style={{ color: theme.muted }}>
             Remove
           </button>
         )}
@@ -76,11 +70,12 @@ function ItemRow({ item, names, busy, confirming, onAsk, onKeep, onRemove }: {
 // What was removed from a day, read when the sheet opens: a title or a kind, who removed it and
 // when, and a way back. Never the item's media.
 function RemovedList({ day, names, onRestored }: { day: string; names: MemberNames; onRestored(): void }) {
+  const { config, theme } = useJourney()
   const [rows, setRows] = useState<RemovedRow<string>[] | null>(null)
   const [busyKey, setBusyKey] = useState<string | null>(null)
   const [note, setNote] = useState<string | null>(null)
   const [now] = useState(() => new Date())
-  const base = `${clientConfig().apiBase}/days/${day}`
+  const base = `${config.apiBase}/days/${day}`
 
   useEffect(() => {
     let live = true
@@ -110,18 +105,18 @@ function RemovedList({ day, names, onRestored }: { day: string; names: MemberNam
 
   return (
     <div className="pt-2">
-      {note && <p role="alert" className="py-2 text-sm" style={{ color: DANGER }}>{note}</p>}
-      {rows && rows.length === 0 && <p className="py-6 text-center text-[17px]" style={{ color: MUTED, fontFamily: SERIF }}>Nothing is removed.</p>}
+      {note && <p role="alert" className="py-2 text-sm" style={{ color: theme.danger }}>{note}</p>}
+      {rows && rows.length === 0 && <p className="py-6 text-center text-[17px]" style={{ color: theme.muted, fontFamily: theme.serif }}>Nothing is removed.</p>}
       <ol>
         {(rows ?? []).map((r) => {
           const label = r.title ?? KIND_LABEL[r.kind]
           return (
-            <li key={r.key} className="flex items-center justify-between gap-3 border-b py-3" style={{ borderColor: HAIRLINE }}>
+            <li key={r.key} className="flex items-center justify-between gap-3 border-b py-3" style={{ borderColor: theme.hairline }}>
               <div className="min-w-0">
-                <p className="truncate text-[17px]" style={{ color: INK, fontFamily: SERIF }}>{label}</p>
-                <p className="text-xs" style={{ color: MUTED }}>{`${KIND_LABEL[r.kind]} · Removed by ${nameOf(names, r.by)} · ${formatWhen(r.at, now)}`}</p>
+                <p className="truncate text-[17px]" style={{ color: theme.ink, fontFamily: theme.serif }}>{label}</p>
+                <p className="text-xs" style={{ color: theme.muted }}>{`${KIND_LABEL[r.kind]} · Removed by ${nameOf(names, r.by)} · ${formatWhen(r.at, now)}`}</p>
               </div>
-              <button type="button" onClick={() => void restore(r.key)} disabled={busyKey !== null} aria-label={`Restore ${label}`} className="h-11 shrink-0 px-2 text-base underline disabled:opacity-40" style={{ color: INK }}>
+              <button type="button" onClick={() => void restore(r.key)} disabled={busyKey !== null} aria-label={`Restore ${label}`} className="h-11 shrink-0 px-2 text-base underline disabled:opacity-40" style={{ color: theme.ink }}>
                 Restore
               </button>
             </li>
@@ -138,6 +133,7 @@ function RemovedList({ day, names, onRestored }: { day: string; names: MemberNam
 // says how many were removed, and opens the list where one can be put back. After a removal or a
 // restore the day is read again from the server, so the page never shows a guess.
 export function JourneyDay({ view: initial, names }: { view: DayView<string>; names: MemberNames }) {
+  const { config, theme } = useJourney()
   const router = useRouter()
   const [view, setView] = useState(initial)
   const [busyKey, setBusyKey] = useState<string | null>(null)
@@ -145,7 +141,7 @@ export function JourneyDay({ view: initial, names }: { view: DayView<string>; na
   const [note, setNote] = useState<string | null>(null)
   const [sheet, setSheet] = useState(false)
   const [now] = useState(() => new Date())
-  const base = `${clientConfig().apiBase}/days/${view.day}`
+  const base = `${config.apiBase}/days/${view.day}`
 
   // The day as the server now has it. The page behind is refreshed too, so the list of days and
   // anything else the app draws from it agree with what was just done.
@@ -175,22 +171,22 @@ export function JourneyDay({ view: initial, names }: { view: DayView<string>; na
   const groups = view.groups.filter((g) => g.items.length > 0)
   return (
     <div className="px-4 pb-10">
-      <p className={LABEL} style={{ color: MUTED }}>{formatDay(view.day, now)}</p>
+      <p className={LABEL} style={{ color: theme.muted }}>{formatDay(view.day, now)}</p>
       {view.account ? (
         <div className="mt-2 space-y-3">
           {view.account.text.split(/\n{2,}/).map((para, i) => (
-            <p key={i} className="text-[17px] leading-relaxed whitespace-pre-line" style={{ color: INK, fontFamily: SERIF }}>{para}</p>
+            <p key={i} className="text-[17px] leading-relaxed whitespace-pre-line" style={{ color: theme.ink, fontFamily: theme.serif }}>{para}</p>
           ))}
         </div>
       ) : (
-        <p className="mt-2 text-[17px]" style={{ color: MUTED, fontFamily: SERIF }}>
+        <p className="mt-2 text-[17px]" style={{ color: theme.muted, fontFamily: theme.serif }}>
           {view.accountPending ? 'The account of this day is being written again.' : 'This day has not been written up yet.'}
         </p>
       )}
-      {note && <p role="alert" className="mt-3 text-sm" style={{ color: DANGER }}>{note}</p>}
+      {note && <p role="alert" className="mt-3 text-sm" style={{ color: theme.danger }}>{note}</p>}
       {groups.map((g) => (
         <section key={g.name} aria-label={HEADINGS[g.name]} className="mt-8">
-          <h2 className={LABEL} style={{ color: MUTED }}>{HEADINGS[g.name]}</h2>
+          <h2 className={LABEL} style={{ color: theme.muted }}>{HEADINGS[g.name]}</h2>
           <ol>
             {g.items.map((item) => (
               <ItemRow
@@ -208,7 +204,7 @@ export function JourneyDay({ view: initial, names }: { view: DayView<string>; na
         </section>
       ))}
       {view.removedCount > 0 && (
-        <button type="button" onClick={() => setSheet(true)} className="mt-8 h-11 text-base underline" style={{ color: MUTED }}>
+        <button type="button" onClick={() => setSheet(true)} className="mt-8 h-11 text-base underline" style={{ color: theme.muted }}>
           {`${view.removedCount} ${view.removedCount === 1 ? 'item' : 'items'} removed`}
         </button>
       )}

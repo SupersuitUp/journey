@@ -1,11 +1,12 @@
 'use client'
 
 import { useEffect, useRef, type ReactNode } from 'react'
-import { BG, INK, SERIF } from './theme.js'
+import { useJourney } from './context.js'
 
 // A sheet that rises from the bottom over the page. It is mounted only while open. Its Close
 // button, a tap on the backdrop and Escape all close it.
 export function Sheet({ title, onClose, children }: { title: string; onClose(): void; children: ReactNode }) {
+  const { theme } = useJourney()
   const closeRef = useRef<HTMLButtonElement>(null)
   const latest = useRef(onClose)
   latest.current = onClose
@@ -27,10 +28,10 @@ export function Sheet({ title, onClose, children }: { title: string; onClose(): 
       <div className="absolute inset-0 bg-black/40" aria-hidden="true" onClick={onClose} />
       <div
         className="relative max-h-[92dvh] w-full overflow-y-auto overscroll-contain rounded-t-2xl px-5 pt-3 pb-[calc(env(safe-area-inset-bottom)+20px)]"
-        style={{ backgroundColor: BG, color: INK }}
+        style={{ backgroundColor: theme.bg, color: theme.ink }}
       >
         <div className="flex items-center justify-between">
-          <p className="text-xl" style={{ fontFamily: SERIF, fontWeight: 500 }}>{title}</p>
+          <p className="text-xl" style={{ fontFamily: theme.serif, fontWeight: 500 }}>{title}</p>
           <button ref={closeRef} type="button" onClick={onClose} aria-label="Close" className="-mr-3 flex h-11 w-11 items-center justify-center text-2xl">
             <span aria-hidden="true">×</span>
           </button>

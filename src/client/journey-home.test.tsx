@@ -1,15 +1,21 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render as renderBare, screen, waitFor } from '@testing-library/react'
+import type { ReactElement } from 'react'
 import { JourneyHome } from './journey-home.js'
-import { DEFAULT_THEME, setTheme } from './theme.js'
+import { JourneyProvider } from './provider.js'
+import type { ThemeTokens } from './theme.js'
 import type { DayRow } from '../types.js'
+
+// Every screen is drawn the way an app draws it: inside the provider that says where things are.
+const render = (ui: ReactElement, theme?: Partial<ThemeTokens>) =>
+  renderBare(<JourneyProvider config={{ apiBase: '/api/journey', pageBase: '/journey' }} theme={theme}>{ui}</JourneyProvider>)
 
 const WRITTEN: DayRow = { day: '2026-10-12', firstLine: 'Ada and Bo planned the week.', thumbs: ['https://img/1.jpg', 'https://img/2.jpg'], count: 6 }
 const BARE: DayRow = { day: '2026-10-11', firstLine: null, thumbs: [], count: 3 }
 const ONE: DayRow = { day: '2026-10-10', firstLine: null, thumbs: [], count: 1 }
 
 describe('JourneyHome', () => {
-  afterEach(() => { vi.unstubAllGlobals(); setTheme(DEFAULT_THEME) })
+  afterEach(() => { vi.unstubAllGlobals() })
 
   it('says so when there is nothing yet', () => {
     render(<JourneyHome days={[]} next={null} />)
@@ -67,8 +73,7 @@ describe('JourneyHome', () => {
   })
 
   it('draws in the colours the app set', () => {
-    setTheme({ ink: '#010203' })
-    render(<JourneyHome days={[WRITTEN]} next={null} />)
+    render(<JourneyHome days={[WRITTEN]} next={null} />, { ink: '#010203' })
     expect(screen.getByText('Ada and Bo planned the week.')).toHaveStyle({ color: 'rgb(1, 2, 3)' })
   })
 })
