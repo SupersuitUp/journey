@@ -33,4 +33,25 @@ describe('dayHash', () => {
   it('does not change when only the words of an item change', () => {
     expect(dayHash(items(item('a:1', { title: 'one' })))).toBe(dayHash(items(item('a:1', { title: 'two' }))))
   })
+
+  it('changes when a second contributor appears on an item, and when others flips', () => {
+    expect(dayHash(items(item('a:1', { by: ['ada', 'bo'] })))).not.toBe(dayHash(items(item('a:1'))))
+    expect(dayHash(items(item('a:1', { others: true })))).not.toBe(dayHash(items(item('a:1'))))
+  })
+
+  it('does not depend on the order of contributors or second keys', () => {
+    const one = dayHash(items(item('a:1', { by: ['ada', 'bo'], aka: ['x:9', 'y:8'] })))
+    expect(dayHash(items(item('a:1', { by: ['bo', 'ada'], aka: ['y:8', 'x:9'] })))).toBe(one)
+  })
+
+  it('does not change when only a summary text changes', () => {
+    const a = item('a:1', { summaries: { ada: 'one' } })
+    const b = item('a:1', { summaries: { ada: 'two' } })
+    expect(dayHash(items(a))).toBe(dayHash(items(b)))
+  })
+
+  it('leaves a removed item out whatever its contributors', () => {
+    const removed = item('b:2', { by: ['ada', 'bo'], others: true, removed: { by: 'bo', at: '2026-10-12T16:00:00.000Z' } })
+    expect(dayHash(items(item('a:1'), removed))).toBe(dayHash(items(item('a:1'))))
+  })
 })

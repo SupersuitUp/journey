@@ -22,11 +22,17 @@ export function visibleKeys<M extends string>(items: Record<string, Item<M>>): s
 }
 
 /**
- * What an account was written from. It changes when an item arrives, when a second machine adds
- * its notes to a call, and when an item is removed or restored; it does not change when nothing
- * did, so a machine rewrites a day only when there is something new to say.
+ * What an account was written from. For each visible item it covers the item's key, its second
+ * keys, who contributed it and whether others were there, so it changes when an item arrives,
+ * when a second machine merges into a call, and when an item is removed or restored. It leaves
+ * the words out, and it does not change when nothing did, so a machine rewrites a day only when
+ * there is something new to say.
  */
 export function dayHash<M extends string>(items: Record<string, Item<M>>): string {
-  const text = JSON.stringify(visibleKeys(items))
+  const rows = Object.values(items)
+    .filter((it) => !it.removed)
+    .map((it) => [it.key, [...(it.aka ?? [])].sort(), [...it.by].sort(), it.others === true])
+    .sort((a, b) => (a[0] as string < (b[0] as string) ? -1 : a[0] === b[0] ? 0 : 1))
+  const text = JSON.stringify(rows)
   return fnv(text, 0x811c9dc5) + fnv(text, 0x01234567)
 }

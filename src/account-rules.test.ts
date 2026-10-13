@@ -118,6 +118,30 @@ describe('setAccountOn', () => {
   })
 })
 
+describe('a merge after the account was read', () => {
+  const callOf = (key: string, extra: object = {}) => ({ key, kind: 'call' as const, at: '2026-10-12T15:00:00.000Z', title: 'Sync', meetingKey: 'mk-1', ...extra })
+
+  it('refuses an account built from the old hash, and names the new one', () => {
+    const first = contributeTo(emptyDay<M>(DAY, NOW), 'ada', callOf('c:a1', { summary: 'From Ada.' }), undefined, NOW).rec
+    const read = dayHash(first.items)
+    const written = setAccountOn(first, 'ada', TEXT, read, LATER).rec
+    const merged = contributeTo(written, 'bo', callOf('c:b7', { others: true, line: 'A client joined.' }), undefined, LATEST).rec
+    expect(accountStale(merged)).toBe(true)
+    expect(merged.accountWithheld).toBe(true)
+    const err = refuses(() => setAccountOn(merged, 'ada', 'Built from the purged summary.', read, LATEST), 409)
+    expect(err.extra).toEqual({ hash: dayHash(merged.items) })
+    expect(dayHash(merged.items)).not.toBe(read)
+  })
+
+  it('a plain second-machine summary makes the account stale too', () => {
+    const first = contributeTo(emptyDay<M>(DAY, NOW), 'ada', callOf('c:a1', { summary: 'From Ada.' }), undefined, NOW).rec
+    const written = setAccountOn(first, 'ada', TEXT, dayHash(first.items), LATER).rec
+    const merged = contributeTo(written, 'bo', callOf('c:b7', { summary: 'From Bo.' }), undefined, LATEST).rec
+    expect(accountStale(merged)).toBe(true)
+    expect(merged).not.toHaveProperty('accountWithheld')
+  })
+})
+
 describe('accountStale', () => {
   const written = () => setAccountOn(day(), 'ada', TEXT, dayHash(day().items), LATER).rec
 

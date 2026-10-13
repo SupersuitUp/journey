@@ -227,3 +227,17 @@ describe('setAccount', () => {
     expect(host.announce.dayWritten).toHaveBeenCalledTimes(1)
   })
 })
+
+describe('a merge after the day was read', () => {
+  it('marks the account stale, withholds it when narrowed, and refuses a write from the old hash', async () => {
+    const h = fakeHost()
+    const store = createJourneyStore(h.host)
+    const stored = () => h.f.raw('journey', DAY) as unknown as DayRecord<M>
+    await store.contribute('ada', DAY, { items: [CALL] })
+    const read = dayHash(stored().items)
+    await store.setAccount('ada', DAY, { text: TEXT, basedOn: read })
+    await store.contribute('bo', DAY, { items: [{ ...CALL, key: 'conversations:b7', summary: undefined, others: true, line: 'A client joined.' }] })
+    expect(stored()).toMatchObject({ accountStale: true, accountWithheld: true })
+    await expect(store.setAccount('ada', DAY, { text: 'From the purged summary.', basedOn: read })).rejects.toMatchObject({ status: 409, extra: { hash: dayHash(stored().items) } })
+  })
+})

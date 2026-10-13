@@ -123,6 +123,25 @@ describe('the same call from both machines is one item', () => {
     expect(item).not.toHaveProperty('summaries')
   })
 
+  it('a merge onto a day with an account marks it stale, and a narrowing merge also withholds it', () => {
+    const written = { ...adaFirst(), account: { text: 'Ada met.', by: 'ada' as const, at: NOW, basedOn: 'x', firstAt: NOW } }
+    const plain = contributeTo(written, 'bo', call('conversations:b7', { summary: 'From Bo.' }), undefined, LATER)
+    expect(plain.rec.accountStale).toBe(true)
+    expect(plain.rec).not.toHaveProperty('accountWithheld')
+    const narrow = contributeTo(written, 'bo', call('conversations:b7', { others: true, line: 'A client joined.' }), undefined, LATER)
+    expect(narrow.rec).toMatchObject({ accountStale: true, accountWithheld: true })
+  })
+
+  it('a present contribute marks nothing, and a merge onto a day with no account marks nothing', () => {
+    const written = { ...adaFirst(), account: { text: 'Ada met.', by: 'ada' as const, at: NOW, basedOn: 'x', firstAt: NOW } }
+    const again = contributeTo(written, 'ada', call('conversations:a1'), undefined, LATER)
+    expect(again.result.status).toBe('present')
+    expect(again.rec).not.toHaveProperty('accountStale')
+    const bare = contributeTo(adaFirst(), 'bo', call('conversations:b7', { others: true }), undefined, LATER)
+    expect(bare.rec).not.toHaveProperty('accountStale')
+    expect(bare.rec).not.toHaveProperty('accountWithheld')
+  })
+
   it('a call with no meeting key never merges', () => {
     const first = contributeTo(start(), 'ada', { key: 'conversations:a1', kind: 'call', at: AT, title: 'Sync' }, undefined, NOW).rec
     const step = contributeTo(first, 'bo', { key: 'conversations:b7', kind: 'call', at: AT, title: 'Sync' }, undefined, LATER)

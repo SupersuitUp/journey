@@ -52,12 +52,14 @@ function merge<M extends string>(rec: DayRecord<M>, twin: Item<M>, m: M, item: N
     if (item.summary) merged.summaries = Object.assign({}, twin.summaries, said(m, item.summary))
     if (!merged.media && media) merged.media = media
   }
-  return {
-    rec: { ...rec, items: { ...rec.items, [twin.key]: merged }, updatedAt: now },
-    result: { key: item.key, status: 'merged' },
-    changed: twin.key,
-    narrowed: others && twin.others !== true,
+  const narrowed = others && twin.others !== true
+  const next: DayRecord<M> = { ...rec, items: { ...rec.items, [twin.key]: merged }, updatedAt: now }
+  // A written account may tell of what the merge changed, and of what it just stripped.
+  if (rec.account !== undefined) {
+    next.accountStale = true
+    if (narrowed) next.accountWithheld = true
   }
+  return { rec: next, result: { key: item.key, status: 'merged' }, changed: twin.key, narrowed }
 }
 
 /**
