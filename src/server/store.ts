@@ -48,7 +48,7 @@ export function createJourneyStore<M extends string>(host: JourneyHost<M>) {
   const settle = async (what: string, run: () => unknown): Promise<boolean> => {
     try { await run(); return true } catch (err) { failed(what, err); return false }
   }
-  const NOT_FORGOTTEN = 'Removed, but search could not be updated. Try again.'
+  const NOT_FORGOTTEN = 'Removed. Search will catch up shortly.'
 
   // What one call learned from asking search to forget: which debts search confirmed (`items`,
   // `account`), and which it could not (`failedItems`, `accountFailed`).
@@ -62,8 +62,9 @@ export function createJourneyStore<M extends string>(host: JourneyHost<M>) {
    * again for what its own write added. `skip` is what this same call already asked and was
    * refused, so one call asks once. Whatever was just forgotten and is still on the day is then
    * indexed again as it now stands, which is the only way an item that owed a forget gets back in.
+   * `keep` is a key about to be removed: it is forgotten like the rest but never indexed again.
    */
-  async function pay(day: string, owed: Owed, skip: Paid = NOTHING_PAID): Promise<Paid> {
+  async function pay(day: string, owed: Owed, skip: Paid = NOTHING_PAID, keep?: string): Promise<Paid> {
     const out: Paid = { items: new Set(), account: false, failedItems: new Set(skip.failedItems), accountFailed: skip.accountFailed }
     const done: Owed = { items: [], account: null }
     for (const o of owed.items) {
@@ -85,6 +86,7 @@ export function createJourneyStore<M extends string>(host: JourneyHost<M>) {
     })
     if (!rec) return out
     for (const o of done.items) {
+      if (o.key === keep) continue
       const item = Object.hasOwn(rec.items, o.key) ? rec.items[o.key] : undefined
       if (item && !item.removed && item.owesForget === undefined) quietly('index item', () => host.index?.item(day, o.key))
     }
@@ -204,14 +206,15 @@ export function createJourneyStore<M extends string>(host: JourneyHost<M>) {
   }
 
   // The day as it stands before a write, so what it already owes search is paid first.
-  async function payFirst(day: string): Promise<Paid> {
+  async function payFirst(day: string, keep?: string): Promise<Paid> {
     const seen = await days().doc(day).get()
-    return seen.exists ? pay(day, owedOf(seen.data() as DayRecord<M>)) : NOTHING_PAID
+    return seen.exists ? pay(day, owedOf(seen.data() as DayRecord<M>), NOTHING_PAID, keep) : NOTHING_PAID
   }
 
   /**
    * Either member removes any item. The item is hidden, never deleted, and search has forgotten it
-   * by the time this answers; if search cannot, this rejects with a 409 that carries
+   * by the time this answers: a forget asked for after the removal was saved, and waited for. One
+   * paid before the removal never counts, since the removal marks the debt again. If search cannot, this rejects with a 409 that carries
    * `removed: true`, the removal still stands, and the forget stays owed on the day, where any
    * later call that writes the day tries it again. Removing what is already removed changes
    * nothing and asks search to forget again.
@@ -220,7 +223,7 @@ export function createJourneyStore<M extends string>(host: JourneyHost<M>) {
     const day = validateDay(dayRaw)
     const key = validateKey(keyRaw)
     const ref = days().doc(day)
-    const first = await payFirst(day)
+    const first = await payFirst(day, key)
     const now = nowIso()
     const out = await host.db().runTransaction(async (tx) => {
       const doc = await tx.get(ref)
@@ -229,13 +232,14 @@ export function createJourneyStore<M extends string>(host: JourneyHost<M>) {
       if (step.changed) tx.set(ref, { ...step.rec })
       return { key: step.key, hadAccount: step.hadAccount, removedCount: removedOf(step.rec).length, owed: owedOf(step.rec) }
     })
-    const second = await pay(day, out.owed, first)
+    const second = await pay(day, out.owed, first, out.key)
     // This removal answers for its own item and the day's account, not for what else the day owes.
     // A debt this call already saw refused is not asked twice; an item that owes nothing (it was
-    // removed and forgotten before) is asked once more all the same.
+    // removed and forgotten before) is asked once more all the same. What `first` paid, before the
+    // removal was saved, is not counted: only a forget asked after it is.
     const owesItem = out.owed.items.some((o) => o.key === out.key)
-    const itemGone = first.items.has(out.key) || second.items.has(out.key) || (!owesItem && await settle('forget item', () => host.forget?.item(day, out.key)))
-    const dayGone = !out.hadAccount || first.account || second.account || (out.owed.account === null && await settle('forget day', () => host.forget?.day?.(day)))
+    const itemGone = second.items.has(out.key) || (!owesItem && await settle('forget item', () => host.forget?.item(day, out.key)))
+    const dayGone = !out.hadAccount || second.account || (out.owed.account === null && await settle('forget day', () => host.forget?.day?.(day)))
     if (!itemGone || !dayGone) throw new RuleError(NOT_FORGOTTEN, 409, { removed: true })
     return { day, key: out.key, removedCount: out.removedCount }
   }

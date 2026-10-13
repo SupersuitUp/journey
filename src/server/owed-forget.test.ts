@@ -131,7 +131,7 @@ describe('a removal owes search a forget in the same way', () => {
     await write()
     searchDown()
     await expect(store.remove('bo', DAY, 'shipped:r1')).rejects.toMatchObject({
-      status: 409, message: 'Removed, but search could not be updated. Try again.', extra: { removed: true },
+      status: 409, message: 'Removed. Search will catch up shortly.', extra: { removed: true },
     })
     expect(stored().items['shipped:r1'].owesForget).toEqual(expect.any(String))
     expect(stored().accountOwesForget).toEqual(expect.any(String))
@@ -143,7 +143,7 @@ describe('a removal owes search a forget in the same way', () => {
     searchDown()
     const res = await handlers.item.DELETE(new Request(`https://app.test/api/journey/days/${DAY}/item?key=shipped%3Ar1`, { method: 'DELETE' }), { params: Promise.resolve({ day: DAY }) })
     expect(res.status).toBe(409)
-    expect(await res.json()).toEqual({ removed: true, error: 'Removed, but search could not be updated. Try again.' })
+    expect(await res.json()).toEqual({ removed: true, error: 'Removed. Search will catch up shortly.' })
     const missing = await handlers.item.DELETE(new Request(`https://app.test/api/journey/days/${DAY}/item?key=shipped%3Anope`, { method: 'DELETE' }), { params: Promise.resolve({ day: DAY }) })
     expect(await missing.json()).toEqual({ error: 'no such item on this day' })
   })
@@ -245,6 +245,68 @@ describe('a removal owes search a forget in the same way', () => {
     const rec = h.f.raw('journey', DAY) as unknown as DayRecord<M>
     expect(rec.items['shipped:r1']).not.toHaveProperty('owesForget')
     expect(rec.items[A1]).not.toHaveProperty('owesForget')
+  })
+})
+
+describe('a removal answers only for a forget asked after it was saved', () => {
+  // Every transaction is a line in the call log, so the order of a write and a forget can be read.
+  const logWrites = (s: Awaited<ReturnType<typeof setup>>) => {
+    const db = s.host.db()
+    s.host.db = () => ({ ...db, runTransaction: async (fn: never) => { const r = await db.runTransaction(fn); s.calls.push('write'); return r } }) as unknown as typeof db
+  }
+  const owing = async (s: Awaited<ReturnType<typeof setup>>) => {
+    s.searchDown()
+    await s.store.contribute('bo', DAY, { items: [OTHERS] })
+    s.searchUp()
+    s.calls.length = 0
+    logWrites(s)
+  }
+
+  it('an item that owed a forget is forgotten again after the removal is saved, and never indexed by the removal', async () => {
+    const s = await setup()
+    await owing(s)
+    expect(s.stored().items[A1].owesForget).toEqual(expect.any(String))
+    await expect(s.store.remove('ada', DAY, A1)).resolves.toMatchObject({ key: A1 })
+    const forgets = s.calls.flatMap((c, i) => (c === `forget.item:${DAY}:${A1}` ? [i] : []))
+    const removalWrite = s.calls.findIndex((c, i) => c === 'write' && i > forgets[0] && s.calls.slice(forgets[0], i).filter((x) => x === 'write').length === 1)
+    expect(forgets).toHaveLength(2)
+    expect(forgets[1]).toBeGreaterThan(removalWrite)
+    expect(s.calls.filter((c) => c.startsWith('index.item'))).toEqual([])
+    expect(s.host.index!.item).not.toHaveBeenCalledWith(DAY, A1)
+    expect(s.stored().items[A1]).not.toHaveProperty('owesForget')
+  })
+
+  it('a forget that worked before the removal and fails after it is a 409, the mark stays, and a repeat settles it', async () => {
+    const s = await setup()
+    await owing(s)
+    vi.mocked(s.host.forget!.item).mockImplementationOnce(async () => {}).mockRejectedValueOnce(new Error('index down'))
+    await expect(s.store.remove('ada', DAY, A1)).rejects.toMatchObject({ status: 409, extra: { removed: true } })
+    expect(s.stored().items[A1]).toMatchObject({ removed: { by: 'ada' }, owesForget: expect.any(String) })
+    expect(JSON.stringify(await s.store.getDay(DAY))).not.toContain('Weekly sync')
+    await expect(s.store.remove('ada', DAY, A1)).resolves.toMatchObject({ key: A1 })
+    expect(s.stored().items[A1]).not.toHaveProperty('owesForget')
+    expect(s.host.index!.item).not.toHaveBeenCalledWith(DAY, A1)
+  })
+
+  it('the day forget is settled after the removal too', async () => {
+    const s = await setup()
+    await s.write()
+    await owing(s)
+    expect(s.stored().accountOwesForget).toEqual(expect.any(String))
+    vi.mocked(s.host.forget!.day!).mockImplementationOnce(async () => {}).mockRejectedValueOnce(new Error('index down'))
+    await expect(s.store.remove('ada', DAY, 'shipped:r1')).rejects.toMatchObject({ status: 409, extra: { removed: true } })
+    expect(s.stored().accountOwesForget).toEqual(expect.any(String))
+    await expect(s.store.remove('ada', DAY, 'shipped:r1')).resolves.toMatchObject({ key: 'shipped:r1' })
+    expect(s.stored()).not.toHaveProperty('accountOwesForget')
+  })
+
+  it('a slow index started by an earlier call is not joined by one from the removal', async () => {
+    const s = await setup()
+    await owing(s)
+    vi.mocked(s.host.index!.item).mockImplementation(() => new Promise<void>((done) => setTimeout(done, 30)))
+    await s.store.remove('ada', DAY, A1)
+    await new Promise((done) => setTimeout(done, 60))
+    expect(s.host.index!.item).not.toHaveBeenCalledWith(DAY, A1)
   })
 })
 

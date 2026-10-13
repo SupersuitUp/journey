@@ -56,23 +56,23 @@ describe('remove', () => {
   it('a forget that fails rejects the removal with words a person can read, and the item stays hidden', async () => {
     const { store, stored, host, calls } = await setup()
     vi.mocked(host.forget!.item).mockRejectedValueOnce(new Error('index down'))
-    await expect(store.remove('bo', DAY, 'shipped:r1')).rejects.toMatchObject({ status: 409, message: 'Removed, but search could not be updated. Try again.' })
+    await expect(store.remove('bo', DAY, 'shipped:r1')).rejects.toMatchObject({ status: 409, message: 'Removed. Search will catch up shortly.' })
     expect(stored().items['shipped:r1'].removed?.by).toBe('bo')
     expect(host.log).toHaveBeenCalledWith('journey: forget item failed', expect.any(Error))
-    // Again: not "already removed", the forget runs again and the call resolves.
+    // Again: the forget the first try owes is paid before the removal and asked once more after it, since only the second counts.
     await expect(store.remove('bo', DAY, 'shipped:r1')).resolves.toMatchObject({ removedCount: 1 })
-    expect(host.forget!.item).toHaveBeenCalledTimes(2)
-    expect(calls).toEqual([`forget.item:${DAY}:shipped:r1`])
+    expect(host.forget!.item).toHaveBeenCalledTimes(3)
+    expect(calls).toEqual([`forget.item:${DAY}:shipped:r1`, `forget.item:${DAY}:shipped:r1`])
   })
 
   it('a day-level forget that fails is loud in the same way', async () => {
     const { store, stored, host, write } = await setup()
     await write()
     vi.mocked(host.forget!.day!).mockRejectedValueOnce(new Error('index down'))
-    await expect(store.remove('bo', DAY, 'shipped:r1')).rejects.toMatchObject({ status: 409, message: 'Removed, but search could not be updated. Try again.' })
+    await expect(store.remove('bo', DAY, 'shipped:r1')).rejects.toMatchObject({ status: 409, message: 'Removed. Search will catch up shortly.' })
     expect(stored()).toMatchObject({ accountWithheld: true })
     await expect(store.remove('bo', DAY, 'shipped:r1')).resolves.toMatchObject({ removedCount: 1 })
-    expect(host.forget!.day).toHaveBeenCalledTimes(2)
+    expect(host.forget!.day).toHaveBeenCalledTimes(3)
   })
 
   it('removing again keeps the first removal, and asks search to forget again', async () => {

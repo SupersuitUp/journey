@@ -23,7 +23,7 @@ describe('formatDay', () => {
         process.env.TZ = zone
         expect(formatDay('2026-10-12', NOW), zone).toBe('Monday, October 12')
       }
-    } finally { process.env.TZ = had }
+    } finally { if (had === undefined) delete process.env.TZ; else process.env.TZ = had }
   })
 })
 

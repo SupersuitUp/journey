@@ -98,7 +98,7 @@ const MUTATIONS = [
   },
   {
     file: 'src/server/store.ts', tests: ['src/server/owed-forget.test.ts'], why: 'a removal, a restore and an account each retry what the day already owes search',
-    find: 'return seen.exists ? pay(day, owedOf(seen.data() as DayRecord<M>)) : NOTHING_PAID', replace: 'return NOTHING_PAID',
+    find: 'return seen.exists ? pay(day, owedOf(seen.data() as DayRecord<M>), NOTHING_PAID, keep) : NOTHING_PAID', replace: 'return NOTHING_PAID',
   },
   {
     file: 'src/server/store.ts', tests: ['src/server/owed-forget.test.ts'], why: 'a contribution retries what the day already owes search before anything else can stop it',
@@ -147,6 +147,14 @@ const MUTATIONS = [
   {
     file: 'src/views.ts', tests: ['src/views.test.ts', 'src/server/leaks.test.ts'], why: 'searchDay leaves out a withheld account',
     find: 'const shown = rec.account && !rec.accountWithheld && rec.accountOwesForget === undefined', replace: 'const shown = rec.account && rec.accountOwesForget === undefined',
+  },
+  {
+    file: 'src/server/store.ts', tests: ['src/server/owed-forget.test.ts'], why: 'a forget paid before the removal does not count',
+    find: 'const itemGone = second.items.has(out.key) ||', replace: 'const itemGone = first.items.has(out.key) || second.items.has(out.key) ||',
+  },
+  {
+    file: 'src/server/store.ts', tests: ['src/server/owed-forget.test.ts'], why: 'the removal never indexes the item it is removing',
+    find: 'if (o.key === keep) continue', replace: '',
   },
   {
     file: 'src/server/store.ts', tests: ['src/server/remove-account.test.ts'], why: 'a removal whose forget failed answers an error, so the person tries again',

@@ -181,12 +181,12 @@ describe('JourneyDay', () => {
   })
 
   it('removed, though search could not follow: the item is gone, the day is read again, and a note says so in the server words', async () => {
-    const fetchSpy = serve(item('DELETE', 409, { removed: true, error: 'Removed, but search could not be updated. Try again.' }), day(without('shipped:repo/v0.1.0', 1)))
+    const fetchSpy = serve(item('DELETE', 409, { removed: true, error: 'Removed. Search will catch up shortly.' }), day(without('shipped:repo/v0.1.0', 1)))
     render(<JourneyDay view={view()} names={NAMES} />)
     fireEvent.click(screen.getByRole('button', { name: 'Remove Released 0.1.0' }))
     fireEvent.click(screen.getByRole('button', { name: 'Yes, remove Released 0.1.0' }))
     await waitFor(() => expect(screen.queryByText('Released 0.1.0')).toBeNull())
-    expect(screen.getByRole('status')).toHaveTextContent('Removed, but search could not be updated. Try again.')
+    expect(screen.getByRole('status')).toHaveTextContent('Removed. Search will catch up shortly.')
     expect(screen.queryByRole('alert')).toBeNull()
     expect(screen.queryByText(/Not removed/)).toBeNull()
     expect(fetchSpy).toHaveBeenCalledWith(API)
@@ -245,12 +245,12 @@ describe('JourneyDay', () => {
   })
 
   it('removed with a 409 and no fresh read: gone here, in the server words, with the note that the page could not refresh', async () => {
-    serve(item('DELETE', 409, { removed: true, error: 'Removed, but search could not be updated. Try again.' }))
+    serve(item('DELETE', 409, { removed: true, error: 'Removed. Search will catch up shortly.' }))
     render(<JourneyDay view={view({ account: null })} names={NAMES} />)
     fireEvent.click(screen.getByRole('button', { name: 'Remove Released 0.1.0' }))
     fireEvent.click(screen.getByRole('button', { name: 'Yes, remove Released 0.1.0' }))
     await waitFor(() => expect(screen.queryByText('Released 0.1.0')).toBeNull())
-    expect(screen.getByRole('status')).toHaveTextContent('Removed, but search could not be updated. Try again. The page could not refresh. Reload to see the latest.')
+    expect(screen.getByRole('status')).toHaveTextContent('Removed. Search will catch up shortly. The page could not refresh. Reload to see the latest.')
     expect(screen.getByRole('button', { name: '1 item removed' })).toBeInTheDocument()
     expect(screen.getByText('This day has not been written up yet.')).toBeInTheDocument()
   })

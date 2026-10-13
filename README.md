@@ -209,8 +209,8 @@ opaque 500 and goes to the server's log.
 - `DELETE days/<day>/item?key=<item key>`: removes (hides) the item. `POST` to the same address
   restores it. Both answer `{ day, key, removedCount }`. The key rides in the query string,
   URL-encoded, because it may hold colons, slashes and spaces. A removal that search could not
-  follow answers `409 { "removed": true, "error": "Removed, but search could not be updated. Try
-  again." }`: the item is hidden all the same.
+  follow answers `409 { "removed": true, "error": "Removed. Search will
+  catch up shortly." }`: the item is hidden all the same.
 - `GET days/<day>/removed`: `{ removed: [{ key, kind, title?, by, at }] }`, most recent first.
   Titles and kinds only, never media.
 
@@ -335,7 +335,7 @@ with the forget it owes. Then search is told to forget the item (and the day's a
 there was one), and the request waits for that. If search cannot, the route answers
 
 ```
-409 { "removed": true, "error": "Removed, but search could not be updated. Try again." }
+409 { "removed": true, "error": "Removed. Search will catch up shortly." }
 ```
 
 `removed: true` is how a client tells this from a removal that did not happen. The item is hidden
