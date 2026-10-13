@@ -59,26 +59,31 @@ export interface JourneyHost<M extends string> {
   }
   /**
    * The one moment anyone is told: a day was written up for the first time, by `by`'s machine.
-   * Called once per day, after the account is saved. Rewrites, contributions, removals and
-   * restores are quiet. A throw or a rejected promise goes to `log` and never changes the answer.
+   * Called once per day, after the account is saved, and AWAITED before `setAccount` answers, so
+   * a serverless host cannot drop it. A throw or rejection goes to `log` and never changes the
+   * answer; the announcement is not retried, since the day is no longer the first.
+   * Rewrites, contributions, removals and restores are quiet.
    */
   announce: {
     dayWritten(day: string, by: M): void | Promise<void>
   }
   /**
-   * Search. Called after the write is saved and never awaited: `item` after an item is added,
-   * merged or restored, `day` after an account is set. The app reads the day back and indexes
-   * what it finds. A throw or rejection goes to `log`.
+   * Search, adding. Called after the write is saved and NOT awaited: `item` after an item is
+   * added, merged or restored, `day` after an account is set. The app reads the day back and
+   * indexes what it finds. A throw or rejection goes to `log` and has no other effect, so back it
+   * with a pass of your own that indexes what a failed call missed.
    */
   index?: {
     item(day: string, key: string): void | Promise<void>
     day(day: string): void | Promise<void>
   }
   /**
-   * Search, the other way. AWAITED before the request answers: `item` when an item is removed (or a
-   * call turns out to have had other people present), `day` when a removal withholds an account
-   * that may tell of the item. A throw or rejection goes to `log` and never fails the removal, so
-   * back it with a pass of your own that forgets what a failed call left behind.
+   * Search, the other way. AWAITED before the request answers: `item` when an item is removed (or
+   * a call turns out to have had other people present), `day` when a removal withholds an account
+   * that may tell of the item. A throw or rejection goes to `log` and the caller is told: a
+   * removal answers 409 ("Removed, but search could not be updated. Try again.") with the item
+   * still hidden, so a repeat of the same removal runs the forget again; a merge that narrowed an
+   * item reports that item `failed` and does not index it again in that call.
    */
   forget?: {
     item(day: string, key: string): void | Promise<void>

@@ -281,6 +281,40 @@ describe('two calls at once', () => {
   })
 })
 
+describe('a merge that narrows an item when search cannot forget it', () => {
+  const OTHERS = { key: 'conversations:b7', kind: 'call', at: at('10:00'), title: 'Weekly sync', meetingKey: 'mk-1', others: true, line: 'A client joined.' }
+
+  it('does not index the item again, reports it failed, and keeps the merge', async () => {
+    const { store, stored, host, calls } = setup()
+    await store.contribute('ada', DAY, { items: [CALL, SHIPPED] })
+    calls.length = 0
+    vi.mocked(host.forget!.item).mockRejectedValueOnce(new Error('index down'))
+    const answer = await store.contribute('bo', DAY, { items: [OTHERS, { key: 'messages:t1', kind: 'text', at: at('11:30'), words: 'Hi.' }] })
+    expect(answer.results).toEqual([
+      { key: 'conversations:b7', status: 'failed', reason: 'merged, but search could not be updated' },
+      { key: 'messages:t1', status: 'added' },
+    ])
+    expect(stored().items['conversations:a1']).toMatchObject({ others: true, aka: ['conversations:b7'] })
+    expect(stored().items['conversations:a1']).not.toHaveProperty('summaries')
+    expect(calls).toEqual([`index.item:${DAY}:messages:t1`])
+    expect(host.log).toHaveBeenCalledWith('journey: forget item failed', expect.any(Error))
+  })
+})
+
+describe('a search hook that rejects', () => {
+  it('is logged and never becomes an unhandled rejection', async () => {
+    const { store, host } = setup()
+    const unhandled = vi.fn()
+    process.on('unhandledRejection', unhandled)
+    vi.mocked(host.index!.item).mockRejectedValueOnce(new Error('index down'))
+    await store.contribute('ada', DAY, { items: [SHIPPED] })
+    await new Promise((r) => setTimeout(r, 10))
+    process.off('unhandledRejection', unhandled)
+    expect(unhandled).not.toHaveBeenCalled()
+    expect(host.log).toHaveBeenCalledWith('journey: index item failed', expect.any(Error))
+  })
+})
+
 describe('an account racing a contribution', () => {
   it.each(['account first', 'contribution first'])('is refused or marked stale, never stored as current (%s)', async (order) => {
     const h = setup()

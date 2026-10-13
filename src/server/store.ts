@@ -43,10 +43,11 @@ export function createJourneyStore<M extends string>(host: JourneyHost<M>) {
       if (r && typeof r.then === 'function') (r as Promise<unknown>).then(undefined, (err) => failed(what, err))
     } catch (err) { failed(what, err) }
   }
-  // A hook that IS waited for, and still never becomes the answer.
-  const settle = async (what: string, run: () => unknown): Promise<void> => {
-    try { await run() } catch (err) { failed(what, err) }
+  // A hook that IS waited for. Its failure is logged and reported to the caller, who decides what it means.
+  const settle = async (what: string, run: () => unknown): Promise<boolean> => {
+    try { await run(); return true } catch (err) { failed(what, err); return false }
   }
+  const NOT_FORGOTTEN = 'Removed, but search could not be updated. Try again.'
 
   // One item's upload, handed to the app's own pipeline. The record it files lives in the media
   // collection under the upload's id and says which item it was filed for, so a resend whose first
@@ -103,20 +104,24 @@ export function createJourneyStore<M extends string>(host: JourneyHost<M>) {
       const doc = await tx.get(ref)
       let rec = doc.exists ? (doc.data() as DayRecord<M>) : emptyDay<M>(day, now)
       const results: ContributeResult[] = []
-      const touched: { key: string; narrowed: boolean }[] = []
+      const touched: { key: string; narrowed: boolean; at: number }[] = []
       for (const [i, c] of checked.entries()) {
         if (!c.item || whyAt[i] !== undefined) { results.push({ key: c.key, status: 'failed', reason: whyAt[i] ?? 'refused' }); continue }
         const step = contributeTo(rec, m, c.item, filedAt[i], now)
         rec = step.rec
         results.push(step.result)
-        if (step.changed) touched.push({ key: step.changed, narrowed: step.narrowed })
+        if (step.changed) touched.push({ key: step.changed, narrowed: step.narrowed, at: results.length - 1 })
       }
       if (touched.length) tx.set(ref, { ...rec })
       return { results, touched, hash: dayHash(rec.items) }
     })
 
     for (const t of out.touched) {
-      if (t.narrowed) await settle('forget item', () => host.forget?.item(day, t.key))
+      // Search may still hold what the merge just stripped, so it is not indexed again until it has forgotten.
+      if (t.narrowed && !(await settle('forget item', () => host.forget?.item(day, t.key)))) {
+        out.results[t.at] = { key: out.results[t.at].key, status: 'failed', reason: 'merged, but search could not be updated' }
+        continue
+      }
       quietly('index item', () => host.index?.item(day, t.key))
     }
     return { day, hash: out.hash, results: out.results, refused: out.results.filter((r) => r.status === 'refused').map((r) => r.key) }
@@ -124,8 +129,9 @@ export function createJourneyStore<M extends string>(host: JourneyHost<M>) {
 
   /**
    * Either member removes any item. The item is hidden, never deleted, and search has forgotten it
-   * by the time this answers. Removing what is already removed changes nothing and asks search to
-   * forget again, so a forget that failed the first time gets a second try.
+   * by the time this answers; if search cannot, this rejects with a 409 and the removal still
+   * stands. Removing what is already removed changes nothing and asks search to forget again, so
+   * a forget that failed the first time gets a second try.
    */
   async function remove(m: M, dayRaw: unknown, keyRaw: unknown): Promise<{ day: string; key: string; removedCount: number }> {
     const day = validateDay(dayRaw)
@@ -139,8 +145,11 @@ export function createJourneyStore<M extends string>(host: JourneyHost<M>) {
       if (step.changed) tx.set(ref, { ...step.rec })
       return { key: step.key, hadAccount: step.hadAccount, removedCount: removedOf(step.rec).length }
     })
-    await settle('forget item', () => host.forget?.item(day, out.key))
-    if (out.hadAccount) await settle('forget day', () => host.forget?.day?.(day))
+    // The removal is saved. If search cannot forget, the caller is told so it tries again: a repeat
+    // removes nothing more and runs the forgets again.
+    const itemGone = await settle('forget item', () => host.forget?.item(day, out.key))
+    const dayGone = out.hadAccount ? await settle('forget day', () => host.forget?.day?.(day)) : true
+    if (!itemGone || !dayGone) throw new RuleError(NOT_FORGOTTEN, 409)
     return { day, key: out.key, removedCount: out.removedCount }
   }
 
@@ -191,7 +200,9 @@ export function createJourneyStore<M extends string>(host: JourneyHost<M>) {
       return { first: step.first, hash: basedOn }
     })
     quietly('index day', () => host.index?.day(day))
-    if (out.first) quietly('announce dayWritten', () => host.announce.dayWritten(day, m))
+    // Waited for: on a serverless host a promise left running after the answer can be dropped, and
+    // "first" is only ever true once, so a lost announcement is lost for good.
+    if (out.first) await settle('announce dayWritten', () => host.announce.dayWritten(day, m))
     return { day, hash: out.hash, first: out.first }
   }
 

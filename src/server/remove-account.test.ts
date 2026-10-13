@@ -53,12 +53,26 @@ describe('remove', () => {
     expect(calls).toEqual([])
   })
 
-  it('a forget that fails never fails the removal, and is logged', async () => {
-    const { store, stored, host } = await setup()
+  it('a forget that fails rejects the removal with words a person can read, and the item stays hidden', async () => {
+    const { store, stored, host, calls } = await setup()
     vi.mocked(host.forget!.item).mockRejectedValueOnce(new Error('index down'))
-    await expect(store.remove('bo', DAY, 'shipped:r1')).resolves.toMatchObject({ removedCount: 1 })
+    await expect(store.remove('bo', DAY, 'shipped:r1')).rejects.toMatchObject({ status: 409, message: 'Removed, but search could not be updated. Try again.' })
     expect(stored().items['shipped:r1'].removed?.by).toBe('bo')
     expect(host.log).toHaveBeenCalledWith('journey: forget item failed', expect.any(Error))
+    // Again: not "already removed", the forget runs again and the call resolves.
+    await expect(store.remove('bo', DAY, 'shipped:r1')).resolves.toMatchObject({ removedCount: 1 })
+    expect(host.forget!.item).toHaveBeenCalledTimes(2)
+    expect(calls).toEqual([`forget.item:${DAY}:shipped:r1`])
+  })
+
+  it('a day-level forget that fails is loud in the same way', async () => {
+    const { store, stored, host, write } = await setup()
+    await write()
+    vi.mocked(host.forget!.day!).mockRejectedValueOnce(new Error('index down'))
+    await expect(store.remove('bo', DAY, 'shipped:r1')).rejects.toMatchObject({ status: 409, message: 'Removed, but search could not be updated. Try again.' })
+    expect(stored()).toMatchObject({ accountWithheld: true })
+    await expect(store.remove('bo', DAY, 'shipped:r1')).resolves.toMatchObject({ removedCount: 1 })
+    expect(host.forget!.day).toHaveBeenCalledTimes(2)
   })
 
   it('removing again keeps the first removal, and asks search to forget again', async () => {
@@ -208,11 +222,10 @@ describe('setAccount', () => {
     expect(host.log).toHaveBeenCalledWith('journey: announce dayWritten failed', expect.any(Error))
   })
 
-  it('an announcement that rejects later is logged too', async () => {
+  it('an announcement that rejects is logged too, before the write answers', async () => {
     const { host, write } = await setup()
     vi.mocked(host.announce.dayWritten).mockImplementationOnce(async () => { throw new Error('push down') })
     await write()
-    await new Promise((r) => setTimeout(r, 0))
     expect(host.log).toHaveBeenCalledWith('journey: announce dayWritten failed', expect.any(Error))
   })
 
@@ -228,7 +241,18 @@ describe('setAccount', () => {
   })
 })
 
-describe('two accounts at once', () => {
+describe('the announcement is waited for', () => {
+  it('has settled by the time setAccount resolves', async () => {
+    const { host, write } = await setup()
+    let announced = false
+    vi.mocked(host.announce.dayWritten).mockImplementationOnce(async () => {
+      await new Promise((r) => setTimeout(r, 20))
+      announced = true
+    })
+    await write()
+    expect(announced).toBe(true)
+  })
+
   it('two accounts written at once announce the day exactly once', async () => {
     const { store, stored, host } = await setup()
     const basedOn = dayHash(stored().items)
