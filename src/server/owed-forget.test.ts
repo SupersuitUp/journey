@@ -167,6 +167,31 @@ describe('a removal owes search a forget in the same way', () => {
     expect(s.stored()).not.toHaveProperty('accountOwesForget')
   })
 
+  it('a call that is itself refused still pays what the day owes first', async () => {
+    const s = await setup()
+    await s.write()
+    s.searchDown()
+    await expect(s.store.remove('bo', DAY, 'shipped:r1')).rejects.toMatchObject({ status: 409 })
+    const owing = () => [s.stored().items['shipped:r1'].owesForget !== undefined, s.stored().accountOwesForget !== undefined]
+
+    s.searchUp()
+    await expect(s.store.remove('bo', DAY, 'shipped:nope')).rejects.toMatchObject({ status: 404 })
+    expect(owing()).toEqual([false, false])
+
+    // The debt is put back by hand, so each refused call below starts from a day that owes.
+    const rec = s.stored()
+    rec.items['shipped:r1'].owesForget = '2026-10-12T20:00:00.000Z'
+    s.f.seed('journey', { [DAY]: rec })
+    await expect(s.store.setAccount('ada', DAY, { text: 'Ada met.', basedOn: '0'.repeat(16) })).rejects.toMatchObject({ status: 409 })
+    expect(owing()).toEqual([false, false])
+
+    s.f.seed('journey', { [DAY]: rec })
+    const db = s.host.db()
+    s.host.db = () => ({ ...db, collection: (name: string) => (name === 'journey_media' ? { doc: () => ({ get: async () => { throw new Error('UNAVAILABLE') } }) } : db.collection(name)) }) as unknown as typeof db
+    await expect(s.store.contribute('ada', DAY, { items: [{ key: 'camera-roll:p9', kind: 'photo', at: at('12:00'), media: { uploadId: 'upload-photo-9', kind: 'photo' } }] })).rejects.toThrow('UNAVAILABLE')
+    expect(owing()).toEqual([false, false])
+  })
+
   it('a removal answers for its own item only: another item still owing does not fail it', async () => {
     const { store, host, searchDown } = await setup()
     searchDown()

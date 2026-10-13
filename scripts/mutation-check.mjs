@@ -18,7 +18,43 @@ const MUTATIONS = [
   },
   {
     file: 'src/day.ts', tests: ['src/day.test.ts'], why: 'the same call removed under one key is refused under another',
-    find: "if (twin?.removed) return still(rec, { key: item.key, status: 'refused', reason: REMOVED_REASON })", replace: '',
+    find: 'if (twin?.removed) return refuseTwin(rec, twin, item, now)', replace: '',
+  },
+  {
+    file: 'src/day.ts', tests: ['src/day.test.ts', 'src/server/owed-forget.test.ts'], why: 'the refused second recording of a removed call still narrows it when it says others were present',
+    find: 'if (twin?.removed) return refuseTwin(rec, twin, item, now)', replace: "if (twin?.removed) return still(rec, { key: item.key, status: 'refused', reason: REMOVED_REASON })",
+  },
+  {
+    file: 'src/day.ts', tests: ['src/day.test.ts', 'src/server/owed-forget.test.ts'], why: 'a narrowing marks the item as owing search a forget',
+    find: 'const out: Item<M> = { ...item, others: true, owesForget: now }', replace: 'const out: Item<M> = { ...item, others: true }',
+  },
+  {
+    file: 'src/day.ts', tests: ['src/day.test.ts', 'src/server/owed-forget.test.ts'], why: 'a narrowing on a day with an account marks the account as owing a forget too',
+    find: 'if (rec.account !== undefined) next.accountOwesForget = now', replace: '',
+  },
+  {
+    file: 'src/day.ts', tests: ['src/day.test.ts', 'src/server/caps.test.ts'], why: 'a call takes no more than eight other keys',
+    find: 'if (crowded(twin)) {', replace: 'if (false) {',
+  },
+  {
+    file: 'src/removal.ts', tests: ['src/removal.test.ts', 'src/server/owed-forget.test.ts'], why: 'a removal marks the item as owing search a forget',
+    find: 'removed: { by: m, at: now }, owesForget: now }', replace: 'removed: { by: m, at: now } }',
+  },
+  {
+    file: 'src/forget.ts', tests: ['src/forget.test.ts'], why: 'confirming an older debt never clears a newer one',
+    find: 'if (!item || item.owesForget !== p.stamp) continue', replace: 'if (!item) continue',
+  },
+  {
+    file: 'src/item-rules.ts', tests: ['src/item-rules.test.ts', 'src/server/contribute.test.ts'], why: 'a key that breaks the rule fails its own item and not the call',
+    find: "    try {\n      return { key, item: validateItem(raw, day, timeZone) }", replace: "    validateKey(given)\n    try {\n      return { key, item: validateItem(raw, day, timeZone) }",
+  },
+  {
+    file: 'src/item-rules.ts', tests: ['src/item-rules.test.ts'], why: 'a key holds no control character',
+    find: 'CONTROL_RE.test(v) || ', replace: '',
+  },
+  {
+    file: 'src/item-rules.ts', tests: ['src/item-rules.test.ts'], why: 'a key is never of the form the database keeps for itself',
+    find: ' || RESERVED_RE.test(v)', replace: '',
   },
   {
     file: 'src/day.ts', tests: ['src/day.test.ts'], why: 'a merge marks a written account stale',
@@ -58,11 +94,63 @@ const MUTATIONS = [
   },
   {
     file: 'src/server/store.ts', tests: ['src/server/remove-account.test.ts'], why: 'search forgets a removed item before the request answers',
-    find: "await settle('forget item', () => host.forget?.item(day, out.key))", replace: 'true',
+    find: "await settle('forget item', () => host.forget?.item(day, o.key))", replace: 'true',
+  },
+  {
+    file: 'src/server/store.ts', tests: ['src/server/owed-forget.test.ts'], why: 'a removal, a restore and an account each retry what the day already owes search',
+    find: 'return seen.exists ? pay(day, owedOf(seen.data() as DayRecord<M>)) : NOTHING_PAID', replace: 'return NOTHING_PAID',
+  },
+  {
+    file: 'src/server/store.ts', tests: ['src/server/owed-forget.test.ts'], why: 'a contribution retries what the day already owes search before anything else can stop it',
+    find: 'const first = await pay(day, owedOf(before))', replace: 'const first = NOTHING_PAID',
+  },
+  {
+    file: 'src/server/store.ts', tests: ['src/server/owed-forget.test.ts', 'src/server/contribute.test.ts'], why: 'a forget search confirmed is struck off the day',
+    find: 'if (next !== had) tx.set(ref, { ...next })', replace: '',
+  },
+  {
+    file: 'src/server/store.ts', tests: ['src/server/owed-forget.test.ts', 'src/server/contribute.test.ts'], why: 'an item that still owes a forget is never indexed by a contribution',
+    find: ' || stillOwes(out.owed, paid, t.key)) continue', replace: ') continue',
+  },
+  {
+    file: 'src/server/store.ts', tests: ['src/server/owed-forget.test.ts'], why: 'a restored item that still owes a forget is not indexed',
+    find: 'if (out.changed && !out.owes) quietly(', replace: 'if (out.changed) quietly(',
+  },
+  {
+    file: 'src/server/store.ts', tests: ['src/server/owed-forget.test.ts'], why: 'an account that still owes a forget is not indexed',
+    find: "if (!out.owes) quietly('index day'", replace: "quietly('index day'",
+  },
+  {
+    file: 'src/server/store.ts', tests: ['src/server/owed-forget.test.ts'], why: 'the removal 409 says the item is removed',
+    find: 'throw new RuleError(NOT_FORGOTTEN, 409, { removed: true })', replace: 'throw new RuleError(NOT_FORGOTTEN, 409)',
+  },
+  {
+    file: 'src/server/store.ts', tests: ['src/server/caps.test.ts'], why: 'an item that would take the day past the size of a record is left out',
+    find: 'if (step.rec !== rec && !step.narrowed && dayBytes(step.rec) > DAY_MAX_BYTES) {', replace: 'if (false) {',
+  },
+  {
+    file: 'src/server/store.ts', tests: ['src/server/caps.test.ts'], why: 'a narrowing is never held back by the size of the day',
+    find: 'if (step.rec !== rec && !step.narrowed && dayBytes(step.rec) > DAY_MAX_BYTES) {', replace: 'if (step.rec !== rec && dayBytes(step.rec) > DAY_MAX_BYTES) {',
+  },
+  {
+    file: 'src/server/store.ts', tests: ['src/server/contribute.test.ts'], why: 'an upload the pipeline cannot process fails its own item and not the call',
+    find: "        failed('file media', err)\n        throw new RuleError(UNREADABLE, 400)", replace: '        throw err',
+  },
+  {
+    file: 'src/views.ts', tests: ['src/views.test.ts', 'src/server/reads.test.ts', 'src/server/leaks.test.ts'], why: 'searchDay leaves out removed items',
+    find: 'const items = visibleOf(rec).filter((i) => i.owesForget === undefined).map(', replace: 'const items = Object.values(rec.items).filter((i) => i.owesForget === undefined).map(',
+  },
+  {
+    file: 'src/views.ts', tests: ['src/views.test.ts', 'src/server/reads.test.ts'], why: 'searchDay leaves out an item that still owes a forget',
+    find: 'const items = visibleOf(rec).filter((i) => i.owesForget === undefined).map(', replace: 'const items = visibleOf(rec).map(',
+  },
+  {
+    file: 'src/views.ts', tests: ['src/views.test.ts', 'src/server/leaks.test.ts'], why: 'searchDay leaves out a withheld account',
+    find: 'const shown = rec.account && !rec.accountWithheld && rec.accountOwesForget === undefined', replace: 'const shown = rec.account && rec.accountOwesForget === undefined',
   },
   {
     file: 'src/server/store.ts', tests: ['src/server/remove-account.test.ts'], why: 'a removal whose forget failed answers an error, so the person tries again',
-    find: 'if (!itemGone || !dayGone) throw new RuleError(NOT_FORGOTTEN, 409)', replace: '',
+    find: 'if (!itemGone || !dayGone) throw new RuleError(NOT_FORGOTTEN, 409, { removed: true })', replace: '',
   },
   {
     file: 'src/server/handlers.ts', tests: ['src/server/handlers.test.ts'], why: 'an agent route never accepts a session',
@@ -86,7 +174,27 @@ const MUTATIONS = [
   },
   {
     file: 'src/client/journey-day.tsx', tests: ['src/client/journey-day.test.tsx'], why: 'Remove asks once and sends nothing until it is confirmed',
-    find: 'onAsk={() => { setNote(null); setConfirmKey(item.key) }}', replace: 'onAsk={() => { void remove(item.key) }}',
+    find: 'onAsk={() => { setRowNote(null); setConfirmKey(item.key) }}', replace: 'onAsk={() => { void remove(item.key) }}',
+  },
+  {
+    file: 'src/client/journey-day.tsx', tests: ['src/client/journey-day.test.tsx'], why: 'Yes, remove is disabled while its request is on the way',
+    find: '<button type="button" onClick={onRemove} disabled={busy} aria-label', replace: '<button type="button" onClick={onRemove} aria-label',
+  },
+  {
+    file: 'src/client/journey-day.tsx', tests: ['src/client/journey-day.test.tsx'], why: 'a 409 that says removed is shown as a removal that happened',
+    find: 'const anyway = refused !== null && res.status === 409 && refused.removed', replace: 'const anyway = false as boolean',
+  },
+  {
+    file: 'src/client/journey-day.tsx', tests: ['src/client/journey-day.test.tsx'], why: 'a removal that went through is taken off the page even when the day cannot be read again',
+    find: 'if (!fresh) setView((had) => without(had, key, count))', replace: '',
+  },
+  {
+    file: 'src/client/journey-day.tsx', tests: ['src/client/journey-day.test.tsx'], why: 'focus moves to Keep when Remove asks its question',
+    find: 'if (confirming) keepRef.current?.focus()\n    else if', replace: 'if',
+  },
+  {
+    file: 'src/client/provider.tsx', tests: ['src/client/provider.test.tsx'], why: 'the look an app sets reaches the screens under its provider',
+    find: 'const look = JSON.stringify(themeWith(theme))', replace: 'const look = JSON.stringify(themeWith(undefined))',
   },
 ]
 

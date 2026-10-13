@@ -15,7 +15,12 @@ import { fileURLToPath } from 'node:url'
 
 const argRoot = process.argv.indexOf('--root')
 const root = argRoot > 0 ? resolve(process.argv[argRoot + 1]) : fileURLToPath(new URL('..', import.meta.url))
-const SCANNED = ['src', 'test', 'scripts', '.github', 'README.md', 'CHANGELOG.md', 'package.json']
+// Everything a person can read in the repository or in the published package: the sources, the
+// tests with the consumer app's own sources, the scripts and workflows, the documents, the licence
+// and the configuration at the root.
+const SCANNED = ['src', 'test', 'scripts', '.github', 'README.md', 'CHANGELOG.md', 'LICENSE', 'package.json', 'tsconfig*.json', 'vitest.config.ts', '.gitignore']
+// Installed and built files are never ours to scan, whether or not git has been told to ignore them.
+const NOT_OURS = /(^|\/)(node_modules|\.next)\//
 
 const raw = process.env.PRIVATE_WORDS_FILE ? readFileSync(process.env.PRIVATE_WORDS_FILE, 'utf8') : process.env.PRIVATE_WORDS ?? ''
 const words = [...new Set(raw.split(/[\n,]/).map((w) => w.trim().toLowerCase()).filter(Boolean))]
@@ -31,7 +36,7 @@ if (!words.length) {
 // Tracked files AND new ones not yet committed (but not ignored ones): the check runs before the
 // commit that would add a leak, so reading only what git already tracks would pass it.
 const files = execFileSync('git', ['ls-files', '-z', '--cached', '--others', '--exclude-standard', '--', ...SCANNED], { cwd: root, encoding: 'utf8' })
-  .split('\0').filter(Boolean)
+  .split('\0').filter((f) => f && !NOT_OURS.test(f))
 let hits = 0
 let read = 0
 for (const file of files) {

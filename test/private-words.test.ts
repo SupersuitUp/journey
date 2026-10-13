@@ -48,6 +48,31 @@ describe('the private-words check', () => {
     expect(check(repoWith(`// ${WORD}\n`), { PRIVATE_WORDS_FILE: list }).status).toBe(1)
   })
 
+  // A throwaway repository with one clean source file and one more file at the path given.
+  function repoHolding(path: string, content: string, ignore = ''): string {
+    const dir = repoWith('export const a = 1\n')
+    mkdirSync(join(dir, path, '..'), { recursive: true })
+    if (ignore) writeFileSync(join(dir, '.gitignore'), ignore)
+    writeFileSync(join(dir, path), content)
+    return dir
+  }
+
+  it.each([
+    'LICENSE', 'package.json', 'tsconfig.json', 'tsconfig.build.json', 'vitest.config.ts', '.gitignore', 'README.md', 'CHANGELOG.md',
+    'test/consumer/app/page.tsx', 'test/consumer/lib/host.ts', 'test/consumer/package.json', 'scripts/x.mjs', '.github/workflows/ci.yml',
+  ])('reads %s', (path) => {
+    const r = check(repoHolding(path, `one\n${WORD}\n`), { PRIVATE_WORDS: WORD })
+    expect(r.status).toBe(1)
+    expect(r.stdout).toContain(`${path}:2 contains a private word`)
+  })
+
+  it.each(['test/consumer/node_modules/dep/index.js', 'test/consumer/.next/server/page.js', 'node_modules/dep/index.js'])(
+    'does not read %s, ignored by git or not', (path) => {
+      expect(check(repoHolding(path, `${WORD}\n`, 'node_modules/\ntest/consumer/node_modules/\ntest/consumer/.next/\n'), { PRIVATE_WORDS: WORD }).status).toBe(0)
+      expect(check(repoHolding(path, `${WORD}\n`), { PRIVATE_WORDS: WORD }).status).toBe(0)
+    },
+  )
+
   it('with no list it skips and says so, unless the run requires one', () => {
     const skipped = check(repoWith(`// ${WORD}\n`), {})
     expect(skipped.status).toBe(0)
