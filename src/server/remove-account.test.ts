@@ -228,6 +228,20 @@ describe('setAccount', () => {
   })
 })
 
+describe('two accounts at once', () => {
+  it('two accounts written at once announce the day exactly once', async () => {
+    const { store, stored, host } = await setup()
+    const basedOn = dayHash(stored().items)
+    const [a, b] = await Promise.all([
+      store.setAccount('ada', DAY, { text: 'Ada telling.', basedOn }),
+      store.setAccount('bo', DAY, { text: 'Bo telling.', basedOn }),
+    ])
+    expect(host.announce.dayWritten).toHaveBeenCalledTimes(1)
+    expect([a.first, b.first].sort()).toEqual([false, true])
+    expect(['Ada telling.', 'Bo telling.']).toContain(stored().account?.text)
+  })
+})
+
 describe('a merge after the day was read', () => {
   it('marks the account stale, withholds it when narrowed, and refuses a write from the old hash', async () => {
     const h = fakeHost()

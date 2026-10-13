@@ -2,6 +2,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { RuleError } from '../errors.js'
 import { dayHash } from '../day-hash.js'
+import { accountStale } from '../account-rules.js'
 import { createJourneyStore } from './store.js'
 import { fakeHost, type M } from '../../test/support/fake-host.js'
 import type { DayRecord } from '../types.js'
@@ -235,5 +236,70 @@ describe('media goes through the host own pipeline', () => {
     await store.contribute('ada', DAY, { items: [recorded] })
     await store.contribute('bo', DAY, { items: [{ ...recorded, key: 'conversations:b7', media: { ...recorded.media, uploadId: 'upload-video-2' } }] })
     expect(host.media.fileVideo).toHaveBeenCalledTimes(1)
+  })
+})
+
+// How many times the store's transaction callbacks ran, so a test can tell that two calls really
+// did collide and one of them was run again.
+function countRuns(h: ReturnType<typeof fakeHost>) {
+  const db = h.host.db()
+  let runs = 0
+  h.host.db = () => ({ ...db, runTransaction: (fn: (tx: unknown) => Promise<unknown>) => db.runTransaction((tx) => { runs++; return fn(tx) }) }) as typeof db
+  return () => runs
+}
+
+describe('two calls at once', () => {
+  it('the same call from both machines at once is one item with both contributors', async () => {
+    const h = setup()
+    const runs = countRuns(h)
+    const [a, b] = await Promise.all([
+      h.store.contribute('ada', DAY, { items: [CALL] }),
+      h.store.contribute('bo', DAY, { items: [{ ...CALL, key: 'conversations:b7', summary: 'From Bo.' }] }),
+    ])
+    expect(runs()).toBe(3)
+    const item = Object.values(h.stored().items)
+    expect(item).toHaveLength(1)
+    expect(item[0].by.sort()).toEqual(['ada', 'bo'])
+    expect(item[0].summaries).toEqual({ ada: 'From Ada.', bo: 'From Bo.' })
+    // Whichever landed second saw the first's item and merged into it.
+    expect([a.results[0].status, b.results[0].status].sort()).toEqual(['added', 'merged'])
+    // The one that landed second answers with the hash of the finished day.
+    expect([a.hash, b.hash]).toContain(dayHash(h.stored().items))
+  })
+
+  it('the same key from two machines at once is one item, with no throw', async () => {
+    const h = setup()
+    const runs = countRuns(h)
+    const [a, b] = await Promise.all([
+      h.store.contribute('ada', DAY, { items: [SHIPPED] }),
+      h.store.contribute('bo', DAY, { items: [SHIPPED] }),
+    ])
+    expect(runs()).toBe(3)
+    expect(Object.keys(h.stored().items)).toEqual(['shipped:r1'])
+    expect(h.stored().items['shipped:r1'].by).toHaveLength(1)
+    expect([a.results[0].status, b.results[0].status].sort()).toEqual(['added', 'present'])
+  })
+})
+
+describe('an account racing a contribution', () => {
+  it.each(['account first', 'contribution first'])('is refused or marked stale, never stored as current (%s)', async (order) => {
+    const h = setup()
+    await h.store.contribute('ada', DAY, { items: [SHIPPED] })
+    const basedOn = dayHash(h.stored().items)
+    const write = () => h.store.setAccount('ada', DAY, { text: 'Ada shipped it.', basedOn }).then(() => 'stored', (e: RuleError) => e.status)
+    const add = () => h.store.contribute('bo', DAY, { items: [TEXT] })
+    const started = order === 'account first' ? [write(), add()] : [add(), write()]
+    const results = await Promise.all(started)
+    const outcome = order === 'account first' ? results[0] : results[1]
+    const rec = h.stored()
+    expect(rec.items['messages:t1']).toBeDefined()
+    if (outcome === 'stored') {
+      expect(rec.account?.basedOn).toBe(basedOn)
+      expect(rec.account!.basedOn).not.toBe(dayHash(rec.items))
+      expect(accountStale(rec)).toBe(true)
+    } else {
+      expect(outcome).toBe(409)
+      expect(rec).not.toHaveProperty('account')
+    }
   })
 })
