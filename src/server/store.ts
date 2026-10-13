@@ -49,9 +49,13 @@ export function createJourneyStore<M extends string>(host: JourneyHost<M>) {
   }
   const NOT_FORGOTTEN = 'Removed, but search could not be updated. Try again.'
 
+  const UNREADABLE = 'that upload could not be read'
+
   // One item's upload, handed to the app's own pipeline. The record it files lives in the media
   // collection under the upload's id and says which item it was filed for, so a resend whose first
-  // answer was lost finds it there instead of asking the pipeline to claim a spent ticket.
+  // answer was lost finds it there instead of asking the pipeline to claim a spent ticket. Whatever
+  // the pipeline throws that is not a refusal (a file it cannot decode, a tool that crashed) is its
+  // verdict on this one upload: logged in full, and told to the caller in words that carry none of it.
   async function fileMedia(m: M, day: string, item: NewItem, media: NewMedia): Promise<ItemMedia> {
     const ref = mediaDocs().doc(media.uploadId)
     const had = await ref.get()
@@ -62,9 +66,15 @@ export function createJourneyStore<M extends string>(host: JourneyHost<M>) {
     } else {
       const into: Destination<M> = { ref, record: (filed) => ({ ...filed, ofDay: day, ofKey: item.key, by: m, createdAt: nowIso() }) }
       const stamp = localStamp(item.at, host.timeZone)
-      rec = media.kind === 'photo'
-        ? await host.media.filePhoto(m, media.uploadId, stamp, into)
-        : await host.media.fileVideo(m, media.uploadId, { durationSec: media.durationSec!, width: media.width!, height: media.height!, takenAt: stamp }, into)
+      try {
+        rec = media.kind === 'photo'
+          ? await host.media.filePhoto(m, media.uploadId, stamp, into)
+          : await host.media.fileVideo(m, media.uploadId, { durationSec: media.durationSec!, width: media.width!, height: media.height!, takenAt: stamp }, into)
+      } catch (err) {
+        if (refusal(err)) throw err
+        failed('file media', err)
+        throw new RuleError(UNREADABLE, 400)
+      }
     }
     if (rec.kind !== media.kind) throw new RuleError(`that upload is a ${rec.kind}, not a ${media.kind}`, 400)
     return itemMediaOf(media.uploadId, rec)
@@ -72,9 +82,11 @@ export function createJourneyStore<M extends string>(host: JourneyHost<M>) {
 
   /**
    * One machine's items for one day. Called again and again with only what is new, and safe to
-   * call with what was already sent: a key the day has is `present`, the same call from the other
-   * machine is `merged`, a key a member removed is `refused` for good and listed in `refused`, and
-   * an item that could not be kept this time is `failed` with a reason and may be sent again.
+   * call with what was already sent. Every item sent gets one row back, in the order sent: `added`,
+   * `merged` (the same call from the other machine) and `present` are receipts; `refused` is a key
+   * a member removed, for good, and is also listed in `refused`; `invalid` cannot be kept as it is
+   * (a broken rule, a full day, an upload that is missing or cannot be read); `failed` may be sent
+   * again. One item never sinks the rest.
    */
   async function contribute(m: M, dayRaw: unknown, body: unknown): Promise<ContributeAnswer> {
     const day = validateDay(dayRaw)
@@ -106,10 +118,10 @@ export function createJourneyStore<M extends string>(host: JourneyHost<M>) {
       const results: ContributeResult[] = []
       const touched: { key: string; narrowed: boolean; at: number }[] = []
       for (const [i, c] of checked.entries()) {
-        if (!c.item || whyAt[i] !== undefined) { results.push({ key: c.key, status: 'failed', reason: whyAt[i] ?? 'refused' }); continue }
+        if (!c.item || whyAt[i] !== undefined) { results.push({ index: i, key: c.key, status: 'invalid', reason: whyAt[i] ?? 'refused' }); continue }
         const step = contributeTo(rec, m, c.item, filedAt[i], now)
         rec = step.rec
-        results.push(step.result)
+        results.push({ index: i, ...step.result })
         if (step.changed) touched.push({ key: step.changed, narrowed: step.narrowed, at: results.length - 1 })
       }
       if (touched.length) tx.set(ref, { ...rec })
@@ -119,7 +131,7 @@ export function createJourneyStore<M extends string>(host: JourneyHost<M>) {
     for (const t of out.touched) {
       // Search may still hold what the merge just stripped, so it is not indexed again until it has forgotten.
       if (t.narrowed && !(await settle('forget item', () => host.forget?.item(day, t.key)))) {
-        out.results[t.at] = { key: out.results[t.at].key, status: 'failed', reason: 'merged, but search could not be updated' }
+        out.results[t.at] = { ...out.results[t.at], status: 'failed', reason: 'merged, but search could not be updated' }
         continue
       }
       quietly('index item', () => host.index?.item(day, t.key))

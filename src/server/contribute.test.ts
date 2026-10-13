@@ -39,7 +39,7 @@ describe('contribute', () => {
     const answer = await store.contribute('ada', DAY, { items: [CALL, TEXT, SHIPPED] })
     expect(answer).toEqual({
       day: DAY, hash: dayHash(stored().items), refused: [],
-      results: [{ key: 'conversations:a1', status: 'added' }, { key: 'messages:t1', status: 'added' }, { key: 'shipped:r1', status: 'added' }],
+      results: [{ index: 0, key: 'conversations:a1', status: 'added' }, { index: 1, key: 'messages:t1', status: 'added' }, { index: 2, key: 'shipped:r1', status: 'added' }],
     })
     expect(stored().day).toBe(DAY)
     expect(stored().items['conversations:a1']).toMatchObject({ by: ['ada'], title: 'Weekly sync', summaries: { ada: 'From Ada.' }, at: '2026-10-12T15:00:00.000Z' })
@@ -57,7 +57,7 @@ describe('contribute', () => {
     const before = stored()
     calls.length = 0
     const again = await store.contribute('ada', DAY, { items: [PHOTO_ITEM, SHIPPED] })
-    expect(again.results).toEqual([{ key: 'camera-roll:p1', status: 'present' }, { key: 'shipped:r1', status: 'present' }])
+    expect(again.results).toEqual([{ index: 0, key: 'camera-roll:p1', status: 'present' }, { index: 1, key: 'shipped:r1', status: 'present' }])
     expect(stored()).toEqual(before)
     expect(host.media.filePhoto).toHaveBeenCalledTimes(1)
     expect(calls).toEqual([])
@@ -82,7 +82,7 @@ describe('contribute', () => {
     const { store, stored, calls } = setup()
     await store.contribute('ada', DAY, { items: [CALL] })
     const answer = await store.contribute('bo', DAY, { items: [{ ...CALL, key: 'conversations:b7', summary: 'From Bo.' }] })
-    expect(answer.results).toEqual([{ key: 'conversations:b7', status: 'merged' }])
+    expect(answer.results).toEqual([{ index: 0, key: 'conversations:b7', status: 'merged' }])
     expect(Object.keys(stored().items)).toEqual(['conversations:a1'])
     expect(stored().items['conversations:a1']).toMatchObject({ by: ['ada', 'bo'], aka: ['conversations:b7'], summaries: { ada: 'From Ada.', bo: 'From Bo.' } })
     expect(calls).toEqual([`index.item:${DAY}:conversations:a1`, `index.item:${DAY}:conversations:a1`])
@@ -106,9 +106,9 @@ describe('contribute', () => {
     f.seed('journey', { [DAY]: rec })
     const answer = await store.contribute('ada', DAY, { items: [SHIPPED, TEXT, { ...PHOTO_ITEM, media: { uploadId: 'upload-photo-2', kind: 'photo' } }] })
     expect(answer.results).toEqual([
-      { key: 'shipped:r1', status: 'refused', reason: 'removed by a member' },
-      { key: 'messages:t1', status: 'added' },
-      { key: 'camera-roll:p1', status: 'refused', reason: 'removed by a member' },
+      { index: 0, key: 'shipped:r1', status: 'refused', reason: 'removed by a member' },
+      { index: 1, key: 'messages:t1', status: 'added' },
+      { index: 2, key: 'camera-roll:p1', status: 'refused', reason: 'removed by a member' },
     ])
     expect(answer.refused).toEqual(['shipped:r1', 'camera-roll:p1'])
     expect(host.media.filePhoto).toHaveBeenCalledTimes(1)
@@ -117,23 +117,63 @@ describe('contribute', () => {
   it('reports an item it cannot keep and still lands the rest', async () => {
     const { store, stored } = setup()
     const answer = await store.contribute('ada', DAY, { items: [{ key: 'messages:t9', kind: 'text', at: at('11:00') }, SHIPPED] })
-    expect(answer.results).toEqual([{ key: 'messages:t9', status: 'failed', reason: 'a text needs words' }, { key: 'shipped:r1', status: 'added' }])
+    expect(answer.results).toEqual([{ index: 0, key: 'messages:t9', status: 'invalid', reason: 'a text needs words' }, { index: 1, key: 'shipped:r1', status: 'added' }])
     expect(Object.keys(stored().items)).toEqual(['shipped:r1'])
     expect(answer.refused).toEqual([])
   })
 
-  it('refuses the whole call for a day or a list it cannot read, and writes nothing', async () => {
+  it('refuses the whole call for a day it cannot read, a body with no list, or too many items, and writes nothing', async () => {
     const { store, f } = setup()
     await expect(store.contribute('ada', '2026-13-01', { items: [SHIPPED] })).rejects.toMatchObject({ status: 400 })
-    await expect(store.contribute('ada', DAY, { items: [] })).rejects.toBeInstanceOf(RuleError)
-    await expect(store.contribute('ada', DAY, { items: [{ kind: 'text', at: at('11:00'), words: 'no key' }] })).rejects.toMatchObject({ status: 400 })
+    await expect(store.contribute('ada', undefined, { items: [SHIPPED] })).rejects.toMatchObject({ status: 400 })
+    await expect(store.contribute('ada', DAY, { items: 'x' })).rejects.toBeInstanceOf(RuleError)
+    await expect(store.contribute('ada', DAY, null)).rejects.toMatchObject({ status: 400 })
+    const many = Array.from({ length: 61 }, (_, i) => ({ ...SHIPPED, key: `shipped:r${i}` }))
+    await expect(store.contribute('ada', DAY, { items: many })).rejects.toMatchObject({ status: 400 })
     expect(f.all('journey')).toEqual({})
+  })
+
+  it('an empty list is nothing to do: it answers, and writes nothing', async () => {
+    const { store, f } = setup()
+    expect(await store.contribute('ada', DAY, { items: [] })).toEqual({ day: DAY, hash: dayHash({}), results: [], refused: [] })
+    expect(f.all('journey')).toEqual({})
+  })
+
+  it('one bad key never sinks a batch: that item is invalid in its place, and the rest land', async () => {
+    const { store, stored } = setup()
+    const answer = await store.contribute('ada', DAY, { items: [
+      { ...SHIPPED, key: ' padded' },
+      { kind: 'text', at: at('11:00'), words: 'no key' },
+      { ...SHIPPED, key: 7 },
+      null,
+      { ...SHIPPED, key: '__name__' },
+      { ...SHIPPED, key: 'notes:Réunion du lundi.md' },
+      TEXT,
+    ] })
+    const KEY_WORDS = 'key must be 1 to 300 characters, with no control characters, no space at either end, and not of the form __name__'
+    expect(answer.results).toEqual([
+      { index: 0, key: ' padded', status: 'invalid', reason: KEY_WORDS },
+      { index: 1, key: '', status: 'invalid', reason: KEY_WORDS },
+      { index: 2, key: '', status: 'invalid', reason: KEY_WORDS },
+      { index: 3, key: '', status: 'invalid', reason: KEY_WORDS },
+      { index: 4, key: '__name__', status: 'invalid', reason: KEY_WORDS },
+      { index: 5, key: 'notes:Réunion du lundi.md', status: 'added' },
+      { index: 6, key: 'messages:t1', status: 'added' },
+    ])
+    expect(Object.keys(stored().items).sort()).toEqual(['messages:t1', 'notes:Réunion du lundi.md'])
+    expect(answer.refused).toEqual([])
+  })
+
+  it('every row says where its item stood in the call, so two rows with one key are told apart', async () => {
+    const { store } = setup()
+    const answer = await store.contribute('ada', DAY, { items: [SHIPPED, { ...SHIPPED, title: undefined }, SHIPPED] })
+    expect(answer.results.map((r) => [r.index, r.key, r.status])).toEqual([[0, 'shipped:r1', 'added'], [1, 'shipped:r1', 'invalid'], [2, 'shipped:r1', 'present']])
   })
 
   it('an item sent to the wrong day is reported, since its time does not fall on it', async () => {
     const { store } = setup()
     const answer = await store.contribute('ada', '2026-10-11', { items: [SHIPPED] })
-    expect(answer.results[0]).toMatchObject({ status: 'failed', reason: 'at does not fall on 2026-10-11 in America/Chicago' })
+    expect(answer.results[0]).toMatchObject({ status: 'invalid', reason: 'at does not fall on 2026-10-11 in America/Chicago' })
   })
 
   it('writes whole day documents: keys with dots, slashes and colons stay intact at the top level of items', async () => {
@@ -144,13 +184,13 @@ describe('contribute', () => {
       { key: A, kind: 'shipped', at: at('12:00'), title: 'The sync notes' },
       { key: B, kind: 'shipped', at: at('13:00'), title: 'The release' },
     ] })
-    expect(answer.results).toEqual([{ key: A, status: 'added' }, { key: B, status: 'added' }])
+    expect(answer.results).toEqual([{ index: 0, key: A, status: 'added' }, { index: 1, key: B, status: 'added' }])
     const items = (f.raw('journey', DAY) as unknown as DayRecord<M>).items
     expect(Object.keys(items).sort()).toEqual([A, B].sort())
     expect(items[A].title).toBe('The sync notes')
     expect(items[B].title).toBe('The release')
     const again = await store.contribute('ada', DAY, { items: [{ key: A, kind: 'shipped', at: at('12:00'), title: 'The sync notes' }] })
-    expect(again.results).toEqual([{ key: A, status: 'present' }])
+    expect(again.results).toEqual([{ index: 0, key: A, status: 'present' }])
   })
 
   it('a key that is an Object.prototype property name is an ordinary key', async () => {
@@ -159,7 +199,7 @@ describe('contribute', () => {
       { key: 'constructor', kind: 'shipped', at: at('12:00'), title: 'One' },
       { key: 'toString', kind: 'shipped', at: at('13:00'), title: 'Two' },
     ] })
-    expect(answer.results).toEqual([{ key: 'constructor', status: 'added' }, { key: 'toString', status: 'added' }])
+    expect(answer.results).toEqual([{ index: 0, key: 'constructor', status: 'added' }, { index: 1, key: 'toString', status: 'added' }])
     expect(Object.keys(stored().items).sort()).toEqual(['constructor', 'toString'])
     expect(stored().items['constructor'].title).toBe('One')
     expect(stored().items['toString'].title).toBe('Two')
@@ -196,14 +236,35 @@ describe('media goes through the host own pipeline', () => {
     const { store, stored, host } = setup({ isRefusal: (err) => err instanceof Refusal })
     vi.mocked(host.media.filePhoto).mockRejectedValueOnce(new Refusal('upload not found or expired'))
     const answer = await store.contribute('ada', DAY, { items: [PHOTO_ITEM, SHIPPED] })
-    expect(answer.results).toEqual([{ key: 'camera-roll:p1', status: 'failed', reason: 'upload not found or expired' }, { key: 'shipped:r1', status: 'added' }])
+    expect(answer.results).toEqual([{ index: 0, key: 'camera-roll:p1', status: 'invalid', reason: 'upload not found or expired' }, { index: 1, key: 'shipped:r1', status: 'added' }])
     expect(stored().items).not.toHaveProperty('camera-roll:p1')
   })
 
-  it('anything else the pipeline throws is not a refusal, and stops the call', async () => {
+  it('an upload the pipeline cannot process is invalid in words a person can read, logged, and the rest land', async () => {
+    const { store, stored, host } = setup()
+    vi.mocked(host.media.filePhoto).mockRejectedValueOnce(new Error('sharp: unsupported image format at /tmp/x'))
+    const answer = await store.contribute('ada', DAY, { items: [PHOTO_ITEM, SHIPPED] })
+    expect(answer.results).toEqual([
+      { index: 0, key: 'camera-roll:p1', status: 'invalid', reason: 'that upload could not be read' },
+      { index: 1, key: 'shipped:r1', status: 'added' },
+    ])
+    expect(Object.keys(stored().items)).toEqual(['shipped:r1'])
+    expect(host.log).toHaveBeenCalledWith('journey: file media failed', expect.objectContaining({ message: 'sharp: unsupported image format at /tmp/x' }))
+    expect(JSON.stringify(answer)).not.toContain('sharp')
+  })
+
+  it('the same holds for a video, and for a host that named no refusals of its own', async () => {
+    const { store, host } = setup()
+    vi.mocked(host.media.fileVideo).mockImplementationOnce(() => { throw new TypeError('ffprobe exited 1') })
+    const answer = await store.contribute('ada', DAY, { items: [VIDEO_ITEM, TEXT] })
+    expect(answer.results.map((r) => [r.status, r.reason])).toEqual([['invalid', 'that upload could not be read'], ['added', undefined]])
+  })
+
+  it('a database that cannot be read is not an unreadable upload: the call fails, to be sent again', async () => {
     const { store, host, f } = setup()
-    vi.mocked(host.media.filePhoto).mockRejectedValueOnce(new Error('storage is down'))
-    await expect(store.contribute('ada', DAY, { items: [PHOTO_ITEM, SHIPPED] })).rejects.toThrow('storage is down')
+    const db = host.db()
+    host.db = () => ({ ...db, collection: (name: string) => (name === 'journey_media' ? { doc: () => ({ get: async () => { throw new Error('UNAVAILABLE') } }) } : db.collection(name)) }) as unknown as typeof db
+    await expect(store.contribute('ada', DAY, { items: [PHOTO_ITEM, SHIPPED] })).rejects.toThrow('UNAVAILABLE')
     expect(f.all('journey')).toEqual({})
   })
 
@@ -211,7 +272,7 @@ describe('media goes through the host own pipeline', () => {
     const { store, stored, host, f } = setup()
     f.seed('journey_media', { 'upload-photo-1': { kind: 'photo', takenAt: '2026-10-12T10:20:00', width: 10, height: 20, paths: { original: 'p/original/a.jpg', display: 'p/display/a.jpg', thumb: 'p/thumb/a.jpg' }, ofDay: DAY, ofKey: 'camera-roll:p1', by: 'ada', createdAt: '2026-10-12T15:21:00.000Z' } })
     const answer = await store.contribute('ada', DAY, { items: [PHOTO_ITEM] })
-    expect(answer.results).toEqual([{ key: 'camera-roll:p1', status: 'added' }])
+    expect(answer.results).toEqual([{ index: 0, key: 'camera-roll:p1', status: 'added' }])
     expect(host.media.filePhoto).not.toHaveBeenCalled()
     expect(stored().items['camera-roll:p1'].media).toMatchObject({ id: 'upload-photo-1', width: 10, thumbPath: 'p/thumb/a.jpg' })
   })
@@ -220,14 +281,14 @@ describe('media goes through the host own pipeline', () => {
     const { store, f } = setup()
     f.seed('journey_media', { 'upload-photo-1': { kind: 'photo', takenAt: '2026-10-12T10:20:00', width: 10, height: 20, paths: { original: 'o', display: 'd', thumb: 't' }, ofDay: DAY, ofKey: 'camera-roll:other', by: 'ada', createdAt: '2026-10-12T15:21:00.000Z' } })
     const answer = await store.contribute('ada', DAY, { items: [PHOTO_ITEM] })
-    expect(answer.results).toEqual([{ key: 'camera-roll:p1', status: 'failed', reason: 'that upload is already filed as something else' }])
+    expect(answer.results).toEqual([{ index: 0, key: 'camera-roll:p1', status: 'invalid', reason: 'that upload is already filed as something else' }])
   })
 
   it('another member upload is not taken either', async () => {
     const { store, f } = setup()
     f.seed('journey_media', { 'upload-photo-1': { kind: 'photo', takenAt: '2026-10-12T10:20:00', width: 10, height: 20, paths: { original: 'o', display: 'd', thumb: 't' }, ofDay: DAY, ofKey: 'camera-roll:p1', by: 'bo', createdAt: '2026-10-12T15:21:00.000Z' } })
     const answer = await store.contribute('ada', DAY, { items: [PHOTO_ITEM] })
-    expect(answer.results[0].status).toBe('failed')
+    expect(answer.results[0].status).toBe('invalid')
   })
 
   it('files nothing for a call that already has its recording', async () => {
@@ -291,8 +352,8 @@ describe('a merge that narrows an item when search cannot forget it', () => {
     vi.mocked(host.forget!.item).mockRejectedValueOnce(new Error('index down'))
     const answer = await store.contribute('bo', DAY, { items: [OTHERS, { key: 'messages:t1', kind: 'text', at: at('11:30'), words: 'Hi.' }] })
     expect(answer.results).toEqual([
-      { key: 'conversations:b7', status: 'failed', reason: 'merged, but search could not be updated' },
-      { key: 'messages:t1', status: 'added' },
+      { index: 0, key: 'conversations:b7', status: 'failed', reason: 'merged, but search could not be updated' },
+      { index: 1, key: 'messages:t1', status: 'added' },
     ])
     expect(stored().items['conversations:a1']).toMatchObject({ others: true, aka: ['conversations:b7'] })
     expect(stored().items['conversations:a1']).not.toHaveProperty('summaries')

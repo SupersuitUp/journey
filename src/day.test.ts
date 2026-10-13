@@ -175,11 +175,11 @@ describe('a removed item is never taken back', () => {
 })
 
 describe('a day has a size', () => {
-  it('reports an item past the limit as failed, which may be sent again', () => {
+  it('reports an item past the limit as invalid: sending it again as it is would change nothing', () => {
     const items: Record<string, Item<M>> = {}
     for (let i = 0; i < DAY_MAX_ITEMS; i++) items[`shipped:r${i}`] = { key: `shipped:r${i}`, kind: 'shipped', at: AT, by: ['ada'], title: 'x', addedAt: NOW }
     const step = contributeTo({ ...start(), items }, 'ada', shipped('shipped:one-more'), undefined, LATER)
-    expect(step.result).toEqual({ key: 'shipped:one-more', status: 'failed', reason: FULL_REASON })
+    expect(step.result).toEqual({ key: 'shipped:one-more', status: 'invalid', reason: FULL_REASON })
     expect(step.changed).toBeNull()
   })
 })

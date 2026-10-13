@@ -26,8 +26,9 @@ export interface JourneyHost<M extends string> {
    * Which of the app's OWN errors are refusals whose words go back to a caller. This package's own
    * RuleError is always a refusal; this check ADDS to that, so an error is never shown just because
    * it carries a 4xx status. Pass your upload pipeline's refusal check here: a refusal from
-   * `media.filePhoto` or `media.fileVideo` then fails that one item with the pipeline's own words,
-   * and the rest of the batch still lands. Left out, a refused upload fails the whole call as a 500.
+   * `media.filePhoto` or `media.fileVideo` then answers that one item `invalid` with the pipeline's
+   * own words. Anything else the pipeline throws goes to `log` and answers that item `invalid`
+   * with "that upload could not be read". Either way the rest of the batch still lands.
    */
   isRefusal?(err: unknown): boolean
   /** Where failures a caller must not see are reported, such as a hook that throws after the write was saved. */

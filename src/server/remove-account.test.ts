@@ -105,14 +105,14 @@ describe('remove', () => {
     const { store } = await setup()
     await expect(store.remove('bo', DAY, 'shipped:nope')).rejects.toMatchObject({ status: 404, message: 'no such item on this day' })
     await expect(store.remove('bo', '2026-10-11', 'shipped:r1')).rejects.toMatchObject({ status: 404, message: 'no such day' })
-    await expect(store.remove('bo', DAY, 'a b')).rejects.toMatchObject({ status: 400 })
+    await expect(store.remove('bo', DAY, ' a')).rejects.toMatchObject({ status: 400 })
   })
 
   it('a removed key is refused when a machine sends it again, and named so the machine stops', async () => {
     const { store } = await setup()
     await store.remove('bo', DAY, 'shipped:r1')
     const answer = await store.contribute('ada', DAY, { items: [SHIPPED] })
-    expect(answer.results).toEqual([{ key: 'shipped:r1', status: 'refused', reason: 'removed by a member' }])
+    expect(answer.results).toEqual([{ index: 0, key: 'shipped:r1', status: 'refused', reason: 'removed by a member' }])
     expect(answer.refused).toEqual(['shipped:r1'])
   })
 })
@@ -154,7 +154,7 @@ describe('restore', () => {
     const { store } = await setup()
     await store.remove('bo', DAY, 'shipped:r1')
     await store.restore('bo', DAY, 'shipped:r1')
-    expect((await store.contribute('ada', DAY, { items: [SHIPPED] })).results).toEqual([{ key: 'shipped:r1', status: 'present' }])
+    expect((await store.contribute('ada', DAY, { items: [SHIPPED] })).results).toEqual([{ index: 0, key: 'shipped:r1', status: 'present' }])
   })
 
   it('marks a written account stale', async () => {

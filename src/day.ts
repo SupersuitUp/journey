@@ -1,8 +1,9 @@
 import { DAY_MAX_ITEMS } from './item-rules.js'
-import type { ContributeResult, DayRecord, Item, ItemMedia, NewItem } from './types.js'
+import type { ContributeStatus, DayRecord, Item, ItemMedia, NewItem, Outcome } from './types.js'
 
 export const REMOVED_REASON = 'removed by a member'
 export const FULL_REASON = 'this day is full'
+export const CONTRIBUTE_STATUSES: readonly ContributeStatus[] = ['added', 'merged', 'present', 'refused', 'invalid', 'failed']
 
 export function emptyDay<M extends string>(day: string, now: string): DayRecord<M> {
   return { day, items: {}, createdAt: now, updatedAt: now }
@@ -31,9 +32,9 @@ export function wantsMedia<M extends string>(rec: DayRecord<M>, item: NewItem): 
   return !twin || (!twin.removed && !twin.media && twin.others !== true)
 }
 
-export interface Step<M extends string> { rec: DayRecord<M>; result: ContributeResult; changed: string | null; narrowed: boolean }
+export interface Step<M extends string> { rec: DayRecord<M>; result: Outcome; changed: string | null; narrowed: boolean }
 
-const still = <M extends string>(rec: DayRecord<M>, result: ContributeResult): Step<M> => ({ rec, result, changed: null, narrowed: false })
+const still = <M extends string>(rec: DayRecord<M>, result: Outcome): Step<M> => ({ rec, result, changed: null, narrowed: false })
 const said = <M extends string>(m: M, text: string) => ({ [m]: text }) as unknown as Partial<Record<M, string>>
 
 // The second recording of a call the day already holds. The first contributor's item stays the
@@ -74,7 +75,7 @@ export function contributeTo<M extends string>(rec: DayRecord<M>, m: M, item: Ne
   const twin = sameCall(rec, item)
   if (twin?.removed) return still(rec, { key: item.key, status: 'refused', reason: REMOVED_REASON })
   if (twin) return merge(rec, twin, m, item, media, now)
-  if (Object.keys(rec.items).length >= DAY_MAX_ITEMS) return still(rec, { key: item.key, status: 'failed', reason: FULL_REASON })
+  if (Object.keys(rec.items).length >= DAY_MAX_ITEMS) return still(rec, { key: item.key, status: 'invalid', reason: FULL_REASON })
   const fresh: Item<M> = {
     key: item.key, kind: item.kind, at: item.at, by: [m],
     ...(item.title ? { title: item.title } : {}),

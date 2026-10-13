@@ -86,7 +86,8 @@ export function createJourneyHandlers<M extends string>(host: JourneyHost<M>, st
           throw new RuleError('kind must be photo or video', 400)
         }),
       },
-      // Body: { items: [...] }, one to sixty items for this one day. Safe to send again.
+      // Body: { items: [...] }, up to sixty items for this one day. Safe to send again. One row comes
+      // back per item, in order, and one item that cannot be kept never refuses the rest.
       items: {
         POST: (req: Request, { params }: DayParams) => handle(async () => {
           const m = await asAgent(req)

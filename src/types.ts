@@ -75,10 +75,17 @@ export interface NewItem {
   others?: true; meetingKey?: string; media?: NewMedia
 }
 
-// What happened to one contributed key. `refused` is for good (the item was removed by a member);
-// `failed` may be sent again.
-export type ContributeStatus = 'added' | 'present' | 'merged' | 'refused' | 'failed'
-export interface ContributeResult { key: string; status: ContributeStatus; reason?: string }
+// What happened to one contributed item, and so what its sender does next:
+//   added, merged, present   it is on the day: keep the receipt and never send it again;
+//   refused                  a member removed it: for good, so the sender forgets the key;
+//   invalid                  it cannot be kept as it is (a broken rule, a full day, an upload that
+//                            is missing or cannot be read): report it, and do not send it again as is;
+//   failed                   something passing got in the way: send it again.
+export type ContributeStatus = 'added' | 'merged' | 'present' | 'refused' | 'invalid' | 'failed'
+/** What a rule decided for one key, before the call it came in gives it a place. */
+export interface Outcome { key: string; status: ContributeStatus; reason?: string }
+/** One row per item sent, in the order sent. `index` is its place in the call; `key` is empty when the item gave none. */
+export interface ContributeResult extends Outcome { index: number }
 export interface ContributeAnswer { day: string; hash: string; results: ContributeResult[]; refused: string[] }
 
 // What a member's screen is handed. Media arrives as short-lived signed URLs.

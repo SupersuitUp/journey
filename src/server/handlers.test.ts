@@ -160,7 +160,7 @@ describe('agent routes', () => {
     expect(res.status).toBe(200)
     expect(await res.json()).toEqual({
       day: DAY, hash: dayHash(stored().items), refused: [],
-      results: [{ key: 'shipped:from-bo', status: 'added' }, { key: SHIPPED.key, status: 'present' }],
+      results: [{ index: 0, key: 'shipped:from-bo', status: 'added' }, { index: 1, key: SHIPPED.key, status: 'present' }],
     })
     expect(stored().items['shipped:from-bo'].by).toEqual(['bo'])
   })
@@ -179,6 +179,16 @@ describe('agent routes', () => {
     expect(await broken.json()).toEqual({ error: 'bad request' })
     const many = Array.from({ length: 61 }, (_, i) => ({ ...SHIPPED, key: `shipped:r${i}` }))
     expect((await handlers.agent.items.POST(send('POST', `/agent/days/${DAY}/items`, { items: many }), on())).status).toBe(400)
+  })
+
+  it('items.POST answers 200 when one item has a key it cannot keep, naming that item by its place', async () => {
+    const { handlers } = await setup()
+    const res = await handlers.agent.items.POST(send('POST', `/agent/days/${DAY}/items`, { items: [{ ...SHIPPED, key: 'bad\nkey' }, { ...SHIPPED, key: 'shipped:Second release' }] }), on())
+    expect(res.status).toBe(200)
+    expect((await res.json()).results).toEqual([
+      { index: 0, key: 'bad\nkey', status: 'invalid', reason: expect.stringMatching(/^key must be/) },
+      { index: 1, key: 'shipped:Second release', status: 'added' },
+    ])
   })
 
   it('day.GET hands the writer the day and its hash', async () => {

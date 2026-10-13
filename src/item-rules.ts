@@ -3,7 +3,7 @@ import { dayIn, validateAt } from './day-rules.js'
 import type { FiledMedia, ItemKind, ItemMedia, NewItem, NewMedia } from './types.js'
 
 export const ITEM_KINDS: readonly ItemKind[] = ['call', 'photo', 'video', 'text', 'shipped']
-export const KEY_MAX = 200
+export const KEY_MAX = 300
 export const TITLE_MAX = 200
 export const LINE_MAX = 200
 export const SUMMARY_MAX = 1200
@@ -13,16 +13,23 @@ export const ITEMS_PER_CALL = 60
 export const DAY_MAX_ITEMS = 300
 export const VIDEO_MAX_DURATION_SEC = 21600
 
-// A key starts with a letter or a number and holds no space, so it is never read as a reserved
-// field name and can ride in a URL once encoded. A source makes it: `<source>:<id>`.
-const KEY_RE = /^[A-Za-z0-9][\x21-\x7e]{0,199}$/
+// A key is whatever its source calls the item, so it is taken nearly as it comes: spaces inside
+// and letters of any script are fine. What is refused is what a record cannot hold as a field name
+// or what would read as a different key once printed: nothing at all, more than 300 characters, a
+// control character, a space at either end, half of a surrogate pair, and the `__name__` form the
+// database keeps for itself.
+const CONTROL_RE = /[\u0000-\u001f\u007f]/
+const EDGE_SPACE_RE = /^\s|\s$/
+const RESERVED_RE = /^__[^]*__$/
+const HALF_PAIR_RE = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/
 const MEETING_KEY_RE = /^[\x21-\x7e]{1,200}$/
 const UPLOAD_ID_RE = /^[A-Za-z0-9_-]{8,64}$/
+export const KEY_RULE = `key must be 1 to ${KEY_MAX} characters, with no control characters, no space at either end, and not of the form __name__`
 
 export function validateKey(v: unknown): string {
-  if (typeof v !== 'string' || !KEY_RE.test(v)) {
-    throw new RuleError(`key must be 1 to ${KEY_MAX} characters with no spaces, starting with a letter or a number`, 400)
-  }
+  // Two code units at most make one character, so a longer string is not counted out in full.
+  const fits = typeof v === 'string' && v.length > 0 && v.length <= KEY_MAX * 2 && [...v].length <= KEY_MAX
+  if (!fits || CONTROL_RE.test(v) || EDGE_SPACE_RE.test(v) || RESERVED_RE.test(v) || HALF_PAIR_RE.test(v)) throw new RuleError(KEY_RULE, 400)
   return v
 }
 
@@ -107,15 +114,17 @@ export function validateItem(raw: unknown, day: string, timeZone: string): NewIt
 
 export interface Checked { key: string; item: NewItem | null; reason?: string }
 
-// One contribute call: a list of one to sixty items for one day. An item that cannot be kept is
-// reported by its key and the rest still land; an item with no usable key cannot be reported, so
-// it refuses the whole call.
+// One contribute call: a list of up to sixty items for one day, in the order they were sent. An
+// item that cannot be kept is reported in its place and the rest still land, whatever is wrong
+// with it: a broken rule, a key that is not one, or something that is not an item at all. Its key
+// is handed back as it was given when it is text, and as an empty one otherwise.
 export function checkBatch(body: unknown, day: string, timeZone: string): Checked[] {
   const list = (typeof body === 'object' && body !== null ? (body as { items?: unknown }).items : undefined)
-  if (!Array.isArray(list) || list.length === 0) throw new RuleError('items must be a list with at least one item', 400)
+  if (!Array.isArray(list)) throw new RuleError('items must be a list', 400)
   if (list.length > ITEMS_PER_CALL) throw new RuleError(`at most ${ITEMS_PER_CALL} items in one call`, 400)
   return list.map((raw): Checked => {
-    const key = validateKey(typeof raw === 'object' && raw !== null ? (raw as { key?: unknown }).key : undefined)
+    const given = typeof raw === 'object' && raw !== null ? (raw as { key?: unknown }).key : undefined
+    const key = typeof given === 'string' ? given : ''
     try {
       return { key, item: validateItem(raw, day, timeZone) }
     } catch (err) {

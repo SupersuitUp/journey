@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { RuleError } from './errors.js'
 import {
-  ITEMS_PER_CALL, SUMMARY_MAX, TITLE_MAX, WORDS_MAX, checkBatch, itemMediaOf, validateItem, validateKey, validateMedia,
+  ITEMS_PER_CALL, KEY_MAX, SUMMARY_MAX, TITLE_MAX, WORDS_MAX, checkBatch, itemMediaOf, validateItem, validateKey, validateMedia,
 } from './item-rules.js'
 
 const DAY = '2026-10-12'
@@ -24,8 +24,14 @@ describe('validateKey', () => {
     for (const key of ['conversations:abc123', 'shipped:repo/v1.2.3', 'camera-roll:8F2A/L0/001', 'messages:42', 'constructor']) expect(validateKey(key)).toBe(key)
   })
 
-  it('refuses an empty key, a space, a leading mark and a key that is too long', () => {
-    for (const bad of ['', ' a', 'a b', '_x', ':x', 'a'.repeat(201), 7, null, undefined]) refuses(() => validateKey(bad))
+  it('accepts spaces inside, a leading mark, and letters of any script, up to 300 characters', () => {
+    for (const key of ['notes:Weekly sync.md', '_x', ':x', 'réunion:été 2031', '会議:十月', 'a'.repeat(KEY_MAX), '😀'.repeat(KEY_MAX), '__x', 'x__']) expect(validateKey(key)).toBe(key)
+  })
+
+  it('refuses an empty key, a space at either end, a control character, a reserved name and a key that is too long', () => {
+    for (const bad of ['', ' a', 'a ', '\ta', 'a\n', 'a\tb', 'a\u0000b', 'a\u007fb', '__x__', '____', 'a'.repeat(KEY_MAX + 1), 'a\ud800', 7, null, undefined, {}]) {
+      expect(refuses(() => validateKey(bad))).toMatch(/key must be 1 to 300 characters/)
+    }
   })
 })
 
@@ -92,7 +98,7 @@ describe('validateItem', () => {
 
   it('refuses another kind, and a key it cannot keep', () => {
     expect(refuses(() => ok({ key: 'notes:n1', kind: 'note', title: 'x' }))).toMatch(/kind/)
-    refuses(() => ok({ key: 'a b', kind: 'shipped', title: 'x' }))
+    refuses(() => ok({ key: 'a ', kind: 'shipped', title: 'x' }))
   })
 
   it('holds each field to its length, and keeps a title to one line', () => {
@@ -114,10 +120,11 @@ describe('validateItem', () => {
 describe('checkBatch', () => {
   const good = { key: 'shipped:r1', kind: 'shipped', at: AT, title: 'Released 0.1.0' }
 
-  it('wants a list of one to sixty items', () => {
+  it('wants a list of at most sixty items, and takes an empty one as nothing to do', () => {
     refuses(() => checkBatch(null, DAY, ZONE))
     refuses(() => checkBatch({ items: 'x' }, DAY, ZONE))
-    refuses(() => checkBatch({ items: [] }, DAY, ZONE))
+    refuses(() => checkBatch({}, DAY, ZONE))
+    expect(checkBatch({ items: [] }, DAY, ZONE)).toEqual([])
     expect(refuses(() => checkBatch({ items: Array.from({ length: ITEMS_PER_CALL + 1 }, (_, i) => ({ ...good, key: `shipped:r${i}` })) }, DAY, ZONE))).toMatch(/60/)
     expect(checkBatch({ items: Array.from({ length: ITEMS_PER_CALL }, (_, i) => ({ ...good, key: `shipped:r${i}` })) }, DAY, ZONE)).toHaveLength(ITEMS_PER_CALL)
   })
@@ -128,9 +135,16 @@ describe('checkBatch', () => {
     expect(out[1]).toEqual({ key: 'messages:t1', item: null, reason: 'a text needs words' })
   })
 
-  it('refuses the whole call when an item has no key to report it by', () => {
-    refuses(() => checkBatch({ items: [good, { kind: 'text', at: AT, words: 'hi' }] }, DAY, ZONE))
-    refuses(() => checkBatch({ items: [null] }, DAY, ZONE))
+  it('a key that breaks the rule fails that item only, and is handed back as it was given', () => {
+    const out = checkBatch({ items: [{ ...good, key: ' padded' }, good, { ...good, key: '__name__' }] }, DAY, ZONE)
+    expect(out.map((c) => [c.key, c.item === null])).toEqual([[' padded', true], ['shipped:r1', false], ['__name__', true]])
+    expect(out[0].reason).toMatch(/key must be/)
+  })
+
+  it('an item with no key, a key that is not text, or that is not an item at all fails alone, under an empty key', () => {
+    const out = checkBatch({ items: [{ kind: 'text', at: AT, words: 'hi' }, { ...good, key: 7 }, null, 'x', good] }, DAY, ZONE)
+    expect(out.map((c) => [c.key, c.item === null])).toEqual([['', true], ['', true], ['', true], ['', true], ['shipped:r1', false]])
+    for (const c of out.slice(0, 4)) expect(c.reason).toMatch(/key must be/)
   })
 })
 
