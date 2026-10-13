@@ -87,7 +87,7 @@ export interface JourneyHost<M extends string> {
    * Make both safe to call twice. The debt is written into the day by the same write, so a throw
    * or rejection (which goes to `log`) is not the end of it: the debt stays, and every later call
    * that writes that day asks again until search confirms. The caller is told as well: a removal
-   * answers 409 with `removed: true` ("Removed, but search could not be updated. Try again.")
+   * answers 409 with `removed: true` ("Removed. Search will catch up shortly.")
    * with the item still hidden, and a merge that narrowed a call reports that row `failed`.
    */
   forget?: {
