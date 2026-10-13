@@ -3,13 +3,13 @@ import { RuleError, isRuleError } from '../errors.js'
 import { setAccountOn, validateAccount, validateBasedOn } from '../account-rules.js'
 import { dayHash } from '../day-hash.js'
 import { assertTimeZone, localStamp, validateBefore, validateDay, validateLimit } from '../day-rules.js'
-import { contributeTo, emptyDay, wantsMedia } from '../day.js'
+import { DAY_MAX_BYTES, FULL_REASON, contributeTo, dayBytes, emptyDay, wantsMedia } from '../day.js'
 import { clearOwed, owedOf, type Owed } from '../forget.js'
 import { checkBatch, itemMediaOf, validateKey } from '../item-rules.js'
 import { removeFrom, removedOf, restoreIn } from '../removal.js'
-import { agentDayOf, dayRow, dayView } from '../views.js'
+import { agentDayOf, dayRow, dayView, searchDayOf } from '../views.js'
 import type {
-  AgentDay, ContributeAnswer, ContributeResult, DayRecord, DayRow, DaysPage, DayView, ItemMedia, MediaRecord, NewItem, NewMedia, RemovedRow,
+  AgentDay, ContributeAnswer, ContributeResult, DayRecord, DayRow, DaysPage, DayView, ItemMedia, MediaRecord, NewItem, NewMedia, RemovedRow, SearchDay,
 } from '../types.js'
 import type { Destination, JourneyHost } from './host.js'
 
@@ -129,8 +129,8 @@ export function createJourneyStore<M extends string>(host: JourneyHost<M>) {
    * call with what was already sent. Every item sent gets one row back, in the order sent: `added`,
    * `merged` (the same call from the other machine) and `present` are receipts; `refused` is a key
    * a member removed, for good, and is also listed in `refused`; `invalid` cannot be kept as it is
-   * (a broken rule, a full day, an upload that is missing or cannot be read); `failed` may be sent
-   * again. One item never sinks the rest.
+   * (a broken rule, a day that is full by count or by size, an upload that is missing or cannot be
+   * read); `failed` may be sent again. One item never sinks the rest.
    */
   async function contribute(m: M, dayRaw: unknown, body: unknown): Promise<ContributeAnswer> {
     const day = validateDay(dayRaw)
@@ -167,6 +167,12 @@ export function createJourneyStore<M extends string>(host: JourneyHost<M>) {
       for (const [i, c] of checked.entries()) {
         if (!c.item || whyAt[i] !== undefined) { results.push({ index: i, key: c.key, status: 'invalid', reason: whyAt[i] ?? 'refused' }); continue }
         const step = contributeTo(rec, m, c.item, filedAt[i], now)
+        // An item that would push the record past its size is left out, and the rest still land.
+        // A narrowing is never left out: it takes words and a recording away, and must not wait for room.
+        if (step.rec !== rec && !step.narrowed && dayBytes(step.rec) > DAY_MAX_BYTES) {
+          results.push({ index: i, key: c.key, status: 'invalid', reason: FULL_REASON })
+          continue
+        }
         if (step.rec !== rec) dirty = true
         rec = step.rec
         results.push({ index: i, ...step.result })
@@ -322,10 +328,21 @@ export function createJourneyStore<M extends string>(host: JourneyHost<M>) {
   async function agentDay(dayRaw: unknown): Promise<AgentDay<M>> {
     const day = validateDay(dayRaw)
     const doc = await days().doc(day).get()
-    return agentDayOf(day, doc.exists ? (doc.data() as DayRecord<M>) : null)
+    return agentDayOf(day, doc.exists ? (doc.data() as DayRecord<M>) : null, host.timeZone)
   }
 
-  return { contribute, remove, restore, removed, setAccount, listDays, getDay, agentDay }
+  /**
+   * One day as a search index may hold it, or null when nothing was ever contributed to it. This
+   * is the one read an indexer should use, from `index.item`, `index.day` or a pass of its own:
+   * it never carries a removed item, a withheld account, or anything search still owes a forget for.
+   */
+  async function searchDay(dayRaw: unknown): Promise<SearchDay<M> | null> {
+    const day = validateDay(dayRaw)
+    const doc = await days().doc(day).get()
+    return searchDayOf(doc.exists ? (doc.data() as DayRecord<M>) : null)
+  }
+
+  return { contribute, remove, restore, removed, setAccount, listDays, getDay, agentDay, searchDay }
 }
 
 export type JourneyStore<M extends string> = ReturnType<typeof createJourneyStore<M>>

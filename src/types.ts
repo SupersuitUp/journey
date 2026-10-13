@@ -129,8 +129,19 @@ export interface AgentItem<M extends string = string> {
 }
 export interface AgentDay<M extends string = string> {
   day: string
+  /** The zone the day is counted in, so the writer knows which day an instant falls on. */
+  timeZone: string
   hash: string
   account: { text: string; by: M; at: string; basedOn: string } | null
   accountStale: boolean
   items: AgentItem<M>[]
 }
+
+// What a search index may hold of a day, and nothing else: each visible item's words and where its
+// thumbnail is kept (a stored path, never a signed URL), and the account. An item or an account
+// that search still owes a forget for is left out, as a removed item and a withheld account are.
+export interface SearchItem<M extends string = string> {
+  key: string; kind: ItemKind; at: string; by: M[]
+  title?: string; line?: string; summaries?: Partial<Record<M, string>>; words?: string; thumbPath?: string
+}
+export interface SearchDay<M extends string = string> { day: string; items: SearchItem<M>[]; account?: string }

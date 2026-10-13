@@ -158,6 +158,58 @@ describe('agentDay', () => {
 
   it('reads a day nobody has contributed to as empty, with the hash of nothing', async () => {
     const { store } = setup()
-    expect(await store.agentDay('2026-10-12')).toEqual({ day: '2026-10-12', hash: dayHash({}), account: null, accountStale: false, items: [] })
+    expect(await store.agentDay('2026-10-12')).toEqual({ day: '2026-10-12', timeZone: 'America/Chicago', hash: dayHash({}), account: null, accountStale: false, items: [] })
+  })
+})
+
+describe('agentDay says which zone the day is counted in', () => {
+  it('is the zone the host named', async () => {
+    const h = fakeHost({ timeZone: 'Europe/Lisbon' })
+    const store = createJourneyStore(h.host)
+    await store.contribute('ada', '2026-10-12', { items: [{ key: 'shipped:x', kind: 'shipped', at: '2026-10-12T12:00:00+01:00', title: 'Released' }] })
+    expect((await store.agentDay('2026-10-12')).timeZone).toBe('Europe/Lisbon')
+  })
+})
+
+describe('searchDay', () => {
+  it('is null for a day with no record, and refuses a day that is not one', async () => {
+    const { store } = setup()
+    expect(await store.searchDay('2026-10-12')).toBeNull()
+    await expect(store.searchDay('someday')).rejects.toMatchObject({ status: 400 })
+  })
+
+  it('hands the indexer every visible item and the account, and signs nothing', async () => {
+    const { store, write, host } = setup()
+    const day = '2026-10-12'
+    await store.contribute('ada', day, { items: [shipped(day), photo(day, 1)] })
+    await write(day)
+    expect(await store.searchDay(day)).toEqual({
+      day,
+      account: TEXT,
+      items: [
+        { key: `shipped:${day}:1`, kind: 'shipped', at: '2026-10-12T17:01:00.000Z', by: ['ada'], title: `Released 1 on ${day}` },
+        { key: `camera-roll:${day}:1`, kind: 'photo', at: '2026-10-12T17:11:00.000Z', by: ['ada'], thumbPath: `p/thumb/upload-${day}-1.jpg` },
+      ],
+    })
+    expect(host.media.signedUrl).not.toHaveBeenCalled()
+  })
+
+  it('never holds a removed item, nor the account withheld with it', async () => {
+    const { store, write } = setup()
+    const day = '2026-10-12'
+    await store.contribute('ada', day, { items: [shipped(day), photo(day, 1)] })
+    await write(day)
+    await store.remove('bo', day, `camera-roll:${day}:1`)
+    expect(await store.searchDay(day)).toEqual({ day, items: [expect.objectContaining({ key: `shipped:${day}:1` })] })
+  })
+
+  it('holds nothing of an item whose forget search has not confirmed', async () => {
+    const { store, host } = setup()
+    const day = '2026-10-12'
+    const call = { key: 'conversations:a1', kind: 'call', at: noon(day, 2), title: 'Weekly sync', summary: 'From Ada.', meetingKey: 'mk-1' }
+    await store.contribute('ada', day, { items: [shipped(day), call] })
+    host.forget!.item = async () => { throw new Error('index down') }
+    await store.contribute('bo', day, { items: [{ ...call, key: 'conversations:b7', summary: undefined, others: true, line: 'A client joined.' }] })
+    expect((await store.searchDay(day))!.items.map((i) => i.key)).toEqual([`shipped:${day}:1`])
   })
 })

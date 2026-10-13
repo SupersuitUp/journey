@@ -11,6 +11,9 @@ export const WORDS_MAX = 600
 export const ITEMS_PER_CALL = 60
 // A day is one record, and a record has a size limit; this is far above any real day.
 export const DAY_MAX_ITEMS = 300
+// How many other keys one call answers to. Two machines make one; the rest is room for a source
+// that renames its recordings, without letting a call's list of names grow for ever.
+export const AKA_MAX = 8
 export const VIDEO_MAX_DURATION_SEC = 21600
 
 // A key is whatever its source calls the item, so it is taken nearly as it comes: spaces inside

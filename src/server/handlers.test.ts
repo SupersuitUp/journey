@@ -191,11 +191,11 @@ describe('agent routes', () => {
     ])
   })
 
-  it('day.GET hands the writer the day and its hash', async () => {
+  it('day.GET hands the writer the day, its zone and its hash', async () => {
     const { handlers, stored } = await setup()
     const res = await handlers.agent.day.GET(get(`/agent/days/${DAY}`), on())
     expect(res.status).toBe(200)
-    expect(await res.json()).toMatchObject({ day: DAY, hash: dayHash(stored().items), account: null, accountStale: false, items: [{ key: 'messages:t1' }, { key: SHIPPED.key }] })
+    expect(await res.json()).toMatchObject({ day: DAY, timeZone: 'America/Chicago', hash: dayHash(stored().items), account: null, accountStale: false, items: [{ key: 'messages:t1' }, { key: SHIPPED.key }] })
   })
 
   it('account.PUT sets the account, and answers 409 with the hash to read again from when the day has moved', async () => {

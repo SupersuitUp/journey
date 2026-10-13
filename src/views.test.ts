@@ -3,7 +3,7 @@ import { setAccountOn } from './account-rules.js'
 import { contributeTo, emptyDay } from './day.js'
 import { dayHash } from './day-hash.js'
 import { removeFrom } from './removal.js'
-import { GROUP_ORDER, agentDayOf, dayRow, dayView, itemView, mediaView } from './views.js'
+import { GROUP_ORDER, agentDayOf, dayRow, dayView, itemView, mediaView, searchDayOf } from './views.js'
 import type { DayRecord, ItemMedia, NewItem } from './types.js'
 
 type M = 'ada' | 'bo'
@@ -11,6 +11,7 @@ const DAY = '2026-10-12'
 const NOW = '2026-10-12T16:00:00.000Z'
 const LATER = '2026-10-13T09:00:00.000Z'
 const TEXT = 'Ada and Bo planned the week.\n\nThen they shipped.'
+const ZONE = 'America/Chicago'
 const sign = async (path: string) => `signed:${path}`
 const photo = (n: number): ItemMedia => ({ id: `upload-photo-${n}`, kind: 'photo', width: 3024, height: 4032, thumbPath: `p/thumb/${n}.jpg`, displayPath: `p/display/${n}.jpg` })
 const CLIP: ItemMedia = { id: 'upload-video-1', kind: 'video', width: 1920, height: 1080, thumbPath: 'p/poster/v.jpg', displayPath: 'p/poster/v.jpg', videoPath: 'p/video/v.mp4', durationSec: 62.5 }
@@ -130,7 +131,7 @@ describe('dayRow: one day in the list', () => {
 describe('agentDayOf: what the session that writes the account reads', () => {
   it('lists visible items with their words, their contributors and whether they carry media, never a URL or a path', () => {
     const rec = day()
-    const out = agentDayOf(DAY, rec)
+    const out = agentDayOf(DAY, rec, ZONE)
     expect(out.day).toBe(DAY)
     expect(out.hash).toBe(dayHash(rec.items))
     expect(out.account).toBeNull()
@@ -148,16 +149,16 @@ describe('agentDayOf: what the session that writes the account reads', () => {
 
   it('carries the account and what it was written from, and says when it is stale', () => {
     const rec = written(day())
-    expect(agentDayOf(DAY, rec).account).toEqual({ text: TEXT, by: 'ada', at: LATER, basedOn: dayHash(rec.items) })
-    expect(agentDayOf(DAY, rec).accountStale).toBe(false)
+    expect(agentDayOf(DAY, rec, ZONE).account).toEqual({ text: TEXT, by: 'ada', at: LATER, basedOn: dayHash(rec.items) })
+    expect(agentDayOf(DAY, rec, ZONE).accountStale).toBe(false)
     const grown = contributeTo(rec, 'bo', { key: 'shipped:r2', kind: 'shipped', at: '2026-10-12T22:00:00.000Z', title: 'Released 0.1.1' }, undefined, LATER).rec
-    expect(agentDayOf(DAY, grown).accountStale).toBe(true)
-    expect(agentDayOf(DAY, grown).account?.text).toBe(TEXT)
+    expect(agentDayOf(DAY, grown, ZONE).accountStale).toBe(true)
+    expect(agentDayOf(DAY, grown, ZONE).account?.text).toBe(TEXT)
   })
 
   it('leaves a removed item out, and holds back an account that may tell of it', () => {
     const rec = removeFrom(written(day()), 'bo', 'messages:t1', LATER).rec
-    const out = agentDayOf(DAY, rec)
+    const out = agentDayOf(DAY, rec, ZONE)
     expect(out.items.map((i) => i.key)).not.toContain('messages:t1')
     expect(out.account).toBeNull()
     expect(out.accountStale).toBe(true)
@@ -165,6 +166,52 @@ describe('agentDayOf: what the session that writes the account reads', () => {
   })
 
   it('a day nobody has contributed to reads as an empty day', () => {
-    expect(agentDayOf(DAY, null)).toEqual({ day: DAY, hash: dayHash({}), account: null, accountStale: false, items: [] })
+    expect(agentDayOf(DAY, null, ZONE)).toEqual({ day: DAY, timeZone: ZONE, hash: dayHash({}), account: null, accountStale: false, items: [] })
+  })
+})
+
+describe('agentDayOf carries the zone the day is counted in', () => {
+  it('so the session that writes the account knows which day an instant falls on', () => {
+    expect(agentDayOf(DAY, day(), 'Asia/Tokyo').timeZone).toBe('Asia/Tokyo')
+  })
+})
+
+describe('searchDayOf: the one thing a search index may hold of a day', () => {
+  it('is null for no day', () => {
+    expect(searchDayOf(null)).toBeNull()
+  })
+
+  it('lists every visible item with its words and its thumbnail path, oldest first, and the account once written', () => {
+    const out = searchDayOf(written(day()))!
+    expect(out.day).toBe(DAY)
+    expect(out.account).toBe(TEXT)
+    expect(out.items).toEqual([
+      { key: 'conversations:a1', kind: 'call', at: '2026-10-12T15:00:00.000Z', by: ['ada', 'bo'], title: 'Weekly sync', summaries: { ada: 'From Ada.', bo: 'From Bo.' } },
+      { key: 'camera-roll:p1', kind: 'photo', at: '2026-10-12T15:20:00.000Z', by: ['bo'], title: 'The whiteboard', thumbPath: 'p/thumb/1.jpg' },
+      { key: 'camera-roll:v1', kind: 'video', at: '2026-10-12T15:40:00.000Z', by: ['ada'], thumbPath: 'p/poster/v.jpg' },
+      { key: 'messages:t1', kind: 'text', at: '2026-10-12T16:30:00.000Z', by: ['bo'], words: 'Shipping it today.' },
+      { key: 'conversations:a2', kind: 'call', at: '2026-10-12T18:00:00.000Z', by: ['ada'], title: 'Client call', line: 'Walked through the install.' },
+      { key: 'shipped:r1', kind: 'shipped', at: '2026-10-12T21:00:00.000Z', by: ['ada'], title: 'Released 0.1.0' },
+    ])
+  })
+
+  it('has no account before one is written', () => {
+    expect(searchDayOf(day())).not.toHaveProperty('account')
+  })
+
+  it('leaves out a removed item, and the account withheld with it', () => {
+    const out = searchDayOf(removeFrom(written(day()), 'bo', 'messages:t1', LATER).rec)!
+    expect(out.items.map((i) => i.key)).not.toContain('messages:t1')
+    expect(out).not.toHaveProperty('account')
+    expect(JSON.stringify(out)).not.toContain('Shipping it today.')
+  })
+
+  it('leaves out an item that still owes a forget, visible or not, and an account that does', () => {
+    const rec = written(day())
+    const owing: DayRecord<M> = { ...rec, items: { ...rec.items, 'messages:t1': { ...rec.items['messages:t1'], owesForget: LATER } }, accountOwesForget: LATER }
+    const out = searchDayOf(owing)!
+    expect(out.items.map((i) => i.key)).not.toContain('messages:t1')
+    expect(out.items).toHaveLength(5)
+    expect(out).not.toHaveProperty('account')
   })
 })

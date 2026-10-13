@@ -2,7 +2,7 @@ import { accountStale, firstLineOf } from './account-rules.js'
 import { dayHash } from './day-hash.js'
 import { removedOf, visibleOf } from './removal.js'
 import type {
-  AgentDay, AgentItem, DayGroup, DayRecord, DayRow, DayView, GroupName, Item, ItemKind, ItemMedia, ItemView, MediaView,
+  AgentDay, AgentItem, DayGroup, DayRecord, DayRow, DayView, GroupName, Item, ItemKind, ItemMedia, ItemView, MediaView, SearchDay, SearchItem,
 } from './types.js'
 
 /** How the host turns a stored path into a short-lived read URL. */
@@ -83,11 +83,12 @@ export async function dayRow<M extends string>(rec: DayRecord<M>, sign: Sign): P
 /**
  * One day as the session that writes its account needs it: every visible item's words and facts,
  * whether it carries media (never where), the hash to send back as `basedOn`, the account if there
- * is one to build on, and whether it is owed a rewrite. An account withheld after a removal is not
- * handed back, so the next telling cannot carry forward what was pulled.
+ * is one to build on, whether it is owed a rewrite, and the zone the day is counted in. An account
+ * withheld after a removal is not handed back, so the next telling cannot carry forward what was
+ * pulled.
  */
-export function agentDayOf<M extends string>(day: string, rec: DayRecord<M> | null): AgentDay<M> {
-  if (!rec) return { day, hash: dayHash({}), account: null, accountStale: false, items: [] }
+export function agentDayOf<M extends string>(day: string, rec: DayRecord<M> | null, timeZone: string): AgentDay<M> {
+  if (!rec) return { day, timeZone, hash: dayHash({}), account: null, accountStale: false, items: [] }
   const items = visibleOf(rec).map((i): AgentItem<M> => ({
     key: i.key,
     ...(i.aka ? { aka: i.aka } : {}),
@@ -104,9 +105,30 @@ export function agentDayOf<M extends string>(day: string, rec: DayRecord<M> | nu
   const a = rec.account && !rec.accountWithheld ? rec.account : null
   return {
     day,
+    timeZone,
     hash: dayHash(rec.items),
     account: a ? { text: a.text, by: a.by, at: a.at, basedOn: a.basedOn } : null,
     accountStale: accountStale(rec),
     items,
   }
+}
+
+/**
+ * One day as a search index may hold it, or null for no day. The one read an indexer should use:
+ * it starts from what is visible, then leaves out every item search still owes a forget for, so
+ * an index built from it can never hold what a removal or a narrowing took away. The account is
+ * here only when it is shown to members and owes no forget.
+ */
+export function searchDayOf<M extends string>(rec: DayRecord<M> | null): SearchDay<M> | null {
+  if (!rec) return null
+  const items = visibleOf(rec).filter((i) => i.owesForget === undefined).map((i): SearchItem<M> => ({
+    key: i.key, kind: i.kind, at: i.at, by: i.by,
+    ...(i.title ? { title: i.title } : {}),
+    ...(i.line ? { line: i.line } : {}),
+    ...(i.summaries ? { summaries: i.summaries } : {}),
+    ...(i.words ? { words: i.words } : {}),
+    ...(i.media?.thumbPath ? { thumbPath: i.media.thumbPath } : {}),
+  }))
+  const shown = rec.account && !rec.accountWithheld && rec.accountOwesForget === undefined && items.length > 0
+  return { day: rec.day, items, ...(shown ? { account: rec.account!.text } : {}) }
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { FULL_REASON, REMOVED_REASON, contributeTo, emptyDay, findItem, sameCall, wantsMedia } from './day.js'
-import { DAY_MAX_ITEMS } from './item-rules.js'
+import { DAY_MAX_BYTES, FULL_REASON, REMOVED_REASON, contributeTo, dayBytes, emptyDay, findItem, sameCall, wantsMedia } from './day.js'
+import { AKA_MAX, DAY_MAX_ITEMS } from './item-rules.js'
 import type { DayRecord, Item, ItemMedia, NewItem } from './types.js'
 
 type M = 'ada' | 'bo'
@@ -244,6 +244,51 @@ describe('a day has a size', () => {
     const step = contributeTo({ ...start(), items }, 'ada', shipped('shipped:one-more'), undefined, LATER)
     expect(step.result).toEqual({ key: 'shipped:one-more', status: 'invalid', reason: FULL_REASON })
     expect(step.changed).toBeNull()
+  })
+})
+
+describe('a call answers to a bounded number of keys', () => {
+  const crowded = () => {
+    let rec = contributeTo(start(), 'ada', call('conversations:a1', { summary: 'From Ada.' }), RECORDING, NOW).rec
+    for (let i = 1; i <= AKA_MAX; i++) rec = contributeTo(rec, 'bo', call(`conversations:b${i}`), undefined, NOW).rec
+    return rec
+  }
+
+  it('holds eight other keys, and answers a ninth as present without writing it down', () => {
+    const rec = crowded()
+    expect(AKA_MAX).toBe(8)
+    expect(rec.items['conversations:a1'].aka).toHaveLength(8)
+    const step = contributeTo(rec, 'bo', call('conversations:b9', { summary: 'A ninth.' }), undefined, LATER)
+    expect(step.result).toEqual({ key: 'conversations:b9', status: 'present' })
+    expect(step.rec).toBe(rec)
+    expect(findItem(step.rec, 'conversations:b9')).toBeUndefined()
+  })
+
+  it('a ninth key that says others were present still narrows the call, and is still not written down', () => {
+    const step = contributeTo(crowded(), 'bo', call('conversations:b9', { others: true, line: 'A client joined.' }), undefined, LATER)
+    expect(step.result).toEqual({ key: 'conversations:b9', status: 'present' })
+    expect(step.narrowed).toBe(true)
+    const item = step.rec.items['conversations:a1']
+    expect(item).toMatchObject({ others: true, line: 'A client joined.', owesForget: LATER })
+    expect(item).not.toHaveProperty('summaries')
+    expect(item).not.toHaveProperty('media')
+    expect(item.aka).toHaveLength(8)
+  })
+
+  it('files no upload for a key it will not write down', () => {
+    const VIDEO = { uploadId: 'upload-video-9', kind: 'video' as const, durationSec: 60, width: 1920, height: 1080 }
+    let rec = contributeTo(start(), 'ada', call('conversations:a1'), undefined, NOW).rec
+    for (let i = 1; i <= AKA_MAX; i++) rec = contributeTo(rec, 'bo', call(`conversations:b${i}`), undefined, NOW).rec
+    expect(wantsMedia(rec, call('conversations:b9', { media: VIDEO }))).toBe(false)
+  })
+})
+
+describe('dayBytes: how much room a day takes as one record', () => {
+  it('counts bytes, not characters, and the threshold leaves room under the limit of a record', () => {
+    const rec = contributeTo(start(), 'bo', { key: 'messages:t1', kind: 'text', at: AT, words: '€'.repeat(100) }, undefined, NOW).rec
+    expect(dayBytes(rec)).toBe(new TextEncoder().encode(JSON.stringify(rec)).length)
+    expect(dayBytes(rec) - dayBytes({ ...rec, items: { 'messages:t1': { ...rec.items['messages:t1'], words: '' } } })).toBe(300)
+    expect(DAY_MAX_BYTES).toBe(900_000)
   })
 })
 

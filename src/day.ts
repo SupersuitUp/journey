@@ -1,9 +1,19 @@
-import { DAY_MAX_ITEMS } from './item-rules.js'
+import { AKA_MAX, DAY_MAX_ITEMS } from './item-rules.js'
 import type { ContributeStatus, DayRecord, Item, ItemMedia, NewItem, Outcome } from './types.js'
 
 export const REMOVED_REASON = 'removed by a member'
 export const FULL_REASON = 'this day is full'
 export const CONTRIBUTE_STATUSES: readonly ContributeStatus[] = ['added', 'merged', 'present', 'refused', 'invalid', 'failed']
+
+// The database holds a record of up to 1,048,576 bytes. A day stops taking items well short of
+// that, which leaves room for what is never refused: an account, a removal's marks, a narrowing.
+export const DAY_MAX_BYTES = 900_000
+
+const encoder = new TextEncoder()
+/** How much room a day takes as one record: the bytes of its JSON, as UTF-8. */
+export function dayBytes<M extends string>(rec: DayRecord<M>): number {
+  return encoder.encode(JSON.stringify(rec)).length
+}
 
 export function emptyDay<M extends string>(day: string, now: string): DayRecord<M> {
   return { day, items: {}, createdAt: now, updatedAt: now }
@@ -24,13 +34,16 @@ export function sameCall<M extends string>(rec: DayRecord<M>, item: NewItem): It
 /**
  * Whether an item's upload should be handed to the app's pipeline before the day is written. Not
  * when the day already has the key, and not when the same call is removed, was with other people,
- * or already has its recording: filing then would only leave an upload nothing points to.
+ * already has its recording, or answers to as many keys as it may: filing then would only leave
+ * an upload nothing points to.
  */
 export function wantsMedia<M extends string>(rec: DayRecord<M>, item: NewItem): boolean {
   if (!item.media || findItem(rec, item.key)) return false
   const twin = sameCall(rec, item)
-  return !twin || (!twin.removed && !twin.media && twin.others !== true)
+  return !twin || (!twin.removed && !twin.media && twin.others !== true && !crowded(twin))
 }
+
+const crowded = <M extends string>(twin: Item<M>) => (twin.aka?.length ?? 0) >= AKA_MAX
 
 /**
  * What placing one item did. `changed` is the key of an item search should hear about again, or
@@ -66,6 +79,15 @@ function afterNarrowing<M extends string>(rec: DayRecord<M>, item: Item<M>, now:
 // present the item is treated as one where they were: no recording, no summaries.
 function merge<M extends string>(rec: DayRecord<M>, twin: Item<M>, m: M, item: NewItem, media: ItemMedia | undefined, now: string): Step<M> {
   const narrowed = item.others === true && twin.others !== true
+  // A call that already answers to as many keys as it may takes no more: the key is answered as
+  // present and not written down. What it says about other people being there still counts.
+  if (crowded(twin)) {
+    const result: Outcome = { key: item.key, status: 'present' }
+    if (!narrowed) return still(rec, result)
+    const next = afterNarrowing(rec, narrow(twin, item.line, now), now)
+    if (rec.account !== undefined) { next.accountStale = true; next.accountWithheld = true }
+    return { rec: next, result, changed: twin.key, narrowed: true }
+  }
   let merged: Item<M> = { ...twin, aka: [...(twin.aka ?? []), item.key], by: twin.by.includes(m) ? twin.by : [...twin.by, m] }
   if (!merged.title && item.title) merged.title = item.title
   if (narrowed) merged = narrow(merged, item.line, now)
