@@ -2,11 +2,14 @@ import 'server-only'
 import { RuleError, isRuleError } from '../errors.js'
 import { setAccountOn, validateAccount, validateBasedOn } from '../account-rules.js'
 import { dayHash } from '../day-hash.js'
-import { assertTimeZone, localStamp, validateDay } from '../day-rules.js'
+import { assertTimeZone, localStamp, validateBefore, validateDay, validateLimit } from '../day-rules.js'
 import { contributeTo, emptyDay, wantsMedia } from '../day.js'
 import { checkBatch, itemMediaOf, validateKey } from '../item-rules.js'
 import { removeFrom, removedOf, restoreIn } from '../removal.js'
-import type { ContributeAnswer, ContributeResult, DayRecord, ItemMedia, MediaRecord, NewItem, NewMedia, RemovedRow } from '../types.js'
+import { agentDayOf, dayRow, dayView } from '../views.js'
+import type {
+  AgentDay, ContributeAnswer, ContributeResult, DayRecord, DayRow, DaysPage, DayView, ItemMedia, MediaRecord, NewItem, NewMedia, RemovedRow,
+} from '../types.js'
 import type { Destination, JourneyHost } from './host.js'
 
 const nowIso = () => new Date().toISOString()
@@ -192,7 +195,38 @@ export function createJourneyStore<M extends string>(host: JourneyHost<M>) {
     return { day, hash: out.hash, first: out.first }
   }
 
-  return { contribute, remove, restore, removed, setAccount }
+  const sign = (path: string) => host.media.signedUrl(path)
+
+  /**
+   * Days, newest first. One read of `limit + 1` records ordered by the date each record carries:
+   * the extra one only says whether there is another page. A day with nothing left on it is not a
+   * row, but it still moves the cursor, so paging never stalls on it.
+   */
+  async function listDays(opts: { before?: unknown; limit?: unknown } = {}): Promise<DaysPage> {
+    const before = validateBefore(opts.before)
+    const limit = validateLimit(opts.limit)
+    const from = before ? days().where('day', '<', before) : days()
+    const docs = (await from.orderBy('day', 'desc').limit(limit + 1).get()).docs.map((d) => d.data() as DayRecord<M>)
+    const page = docs.slice(0, limit)
+    const rows = await Promise.all(page.map((rec) => dayRow(rec, sign)))
+    return { days: rows.filter((r): r is DayRow => r !== null), next: docs.length > limit ? page[page.length - 1].day : null }
+  }
+
+  /** One day as a member's page draws it, or null when nothing was ever contributed to it. */
+  async function getDay(dayRaw: unknown): Promise<DayView<M> | null> {
+    const day = validateDay(dayRaw)
+    const doc = await days().doc(day).get()
+    return doc.exists ? dayView(doc.data() as DayRecord<M>, sign) : null
+  }
+
+  /** One day as the session that writes its account reads it. Either member's key reads the whole day. */
+  async function agentDay(dayRaw: unknown): Promise<AgentDay<M>> {
+    const day = validateDay(dayRaw)
+    const doc = await days().doc(day).get()
+    return agentDayOf(day, doc.exists ? (doc.data() as DayRecord<M>) : null)
+  }
+
+  return { contribute, remove, restore, removed, setAccount, listDays, getDay, agentDay }
 }
 
 export type JourneyStore<M extends string> = ReturnType<typeof createJourneyStore<M>>
