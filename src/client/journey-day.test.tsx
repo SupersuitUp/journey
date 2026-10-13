@@ -59,7 +59,8 @@ function serve(...routes: Route[]) {
 }
 const day = (v: DayView): Route => (url, method) => (method === 'GET' && url === API ? Response.json(v) : undefined)
 const removedList = (rows: RemovedRow[]): Route => (url, method) => (method === 'GET' && url === `${API}/removed` ? Response.json({ removed: rows }) : undefined)
-const item = (method: 'DELETE' | 'POST', status = 200): Route => (url, m) => (m === method && url.startsWith(`${API}/item?key=`) ? new Response('{}', { status }) : undefined)
+const item = (method: 'DELETE' | 'POST', status = 200, body: unknown = {}): Route => (url, m) => (m === method && url.startsWith(`${API}/item?key=`) ? new Response(JSON.stringify(body), { status }) : undefined)
+const rowOf = (title: string) => screen.getByText(title).closest('li') as HTMLElement
 
 afterEach(() => { vi.unstubAllGlobals() })
 
@@ -134,21 +135,175 @@ describe('JourneyDay', () => {
     render(<JourneyDay view={view()} names={NAMES} />)
     fireEvent.click(screen.getByRole('button', { name: 'Remove Released 0.1.0' }))
     expect(fetchSpy).not.toHaveBeenCalled()
-    fireEvent.click(screen.getByRole('button', { name: 'Confirm remove Released 0.1.0' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Yes, remove Released 0.1.0' }))
     await waitFor(() => expect(screen.queryByText('Released 0.1.0')).toBeNull())
     expect(fetchSpy).toHaveBeenCalledWith(`${API}/item?key=shipped%3Arepo%2Fv0.1.0`, { method: 'DELETE' })
     expect(screen.getByRole('button', { name: '1 item removed' })).toBeInTheDocument()
     expect(refresh).toHaveBeenCalledTimes(1)
   })
 
-  it('says so when a removal does not go through, and leaves the item where it was', async () => {
+  it('says so on the row when a removal does not go through, and leaves the item where it was', async () => {
     serve(item('DELETE', 500))
     render(<JourneyDay view={view()} names={NAMES} />)
     fireEvent.click(screen.getByRole('button', { name: 'Remove Released 0.1.0' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Confirm remove Released 0.1.0' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Yes, remove Released 0.1.0' }))
     expect(await screen.findByRole('alert')).toHaveTextContent('Not removed. Try again.')
+    expect(within(rowOf('Released 0.1.0')).getByRole('alert')).toHaveTextContent('Not removed. Try again.')
+    expect(within(rowOf('Weekly sync')).queryByRole('alert')).toBeNull()
     expect(screen.getByText('Released 0.1.0')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Remove Released 0.1.0' })).toBeEnabled()
+  })
+
+  it('shows the server own words on the row when it gave some', async () => {
+    serve(item('DELETE', 404, { error: 'no such item on this day' }))
+    render(<JourneyDay view={view()} names={NAMES} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Remove Released 0.1.0' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Yes, remove Released 0.1.0' }))
+    expect(await within(rowOf('Released 0.1.0')).findByRole('alert')).toHaveTextContent('no such item on this day')
+    expect(screen.queryByText('Not removed. Try again.')).toBeNull()
+  })
+
+  it('a 409 that says nothing of the item being removed is a removal that did not happen', async () => {
+    serve(item('DELETE', 409, { error: 'the day changed' }), day(without('shipped:repo/v0.1.0', 1)))
+    render(<JourneyDay view={view()} names={NAMES} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Remove Released 0.1.0' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Yes, remove Released 0.1.0' }))
+    expect(await within(rowOf('Released 0.1.0')).findByRole('alert')).toHaveTextContent('the day changed')
+    expect(refresh).not.toHaveBeenCalled()
+  })
+
+  it('says Not removed when the request never reached the server', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('Failed to fetch') }))
+    render(<JourneyDay view={view()} names={NAMES} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Remove Released 0.1.0' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Yes, remove Released 0.1.0' }))
+    expect(await within(rowOf('Released 0.1.0')).findByRole('alert')).toHaveTextContent('Not removed. Try again.')
+  })
+
+  it('removed, though search could not follow: the item is gone, the day is read again, and a note says so in the server words', async () => {
+    const fetchSpy = serve(item('DELETE', 409, { removed: true, error: 'Removed, but search could not be updated. Try again.' }), day(without('shipped:repo/v0.1.0', 1)))
+    render(<JourneyDay view={view()} names={NAMES} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Remove Released 0.1.0' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Yes, remove Released 0.1.0' }))
+    await waitFor(() => expect(screen.queryByText('Released 0.1.0')).toBeNull())
+    expect(screen.getByRole('status')).toHaveTextContent('Removed, but search could not be updated. Try again.')
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(screen.queryByText(/Not removed/)).toBeNull()
+    expect(fetchSpy).toHaveBeenCalledWith(API)
+    expect(screen.getByRole('button', { name: '1 item removed' })).toBeInTheDocument()
+    expect(refresh).toHaveBeenCalledTimes(1)
+    // The note does not stand in the way: every other item can still be removed.
+    expect(screen.getByRole('button', { name: 'Remove Weekly sync' })).toBeEnabled()
+  })
+
+  it.each([401, 403])('a %i says the person is signed out, and does not invite another try', async (status) => {
+    serve(item('DELETE', status))
+    render(<JourneyDay view={view()} names={NAMES} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Remove Released 0.1.0' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Yes, remove Released 0.1.0' }))
+    const alert = await within(rowOf('Released 0.1.0')).findByRole('alert')
+    expect(alert).toHaveTextContent('You are signed out. Reload to sign in again.')
+    expect(alert).not.toHaveTextContent(/try again/i)
+    expect(screen.getByText('Released 0.1.0')).toBeInTheDocument()
+  })
+
+  it('the bare word this package answers a stranger with is read as what it means: signed out', async () => {
+    serve(item('DELETE', 403, { error: 'private' }))
+    render(<JourneyDay view={view()} names={NAMES} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Remove Released 0.1.0' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Yes, remove Released 0.1.0' }))
+    expect(await within(rowOf('Released 0.1.0')).findByRole('alert')).toHaveTextContent(/^You are signed out. Reload to sign in again.$/)
+  })
+
+  it('a 403 that came with words shows those words', async () => {
+    serve(item('DELETE', 403, { error: 'Your session ended.' }))
+    render(<JourneyDay view={view()} names={NAMES} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Remove Released 0.1.0' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Yes, remove Released 0.1.0' }))
+    const alert = await within(rowOf('Released 0.1.0')).findByRole('alert')
+    expect(alert).toHaveTextContent('Your session ended.')
+    expect(alert).not.toHaveTextContent(/try again/i)
+  })
+
+  it.each([
+    ['answers an error', (): Route => (url, m) => (m === 'GET' && url === API ? new Response('{}', { status: 500 }) : undefined)],
+    ['never arrives', (): Route => (url, m) => { if (m === 'GET' && url === API) throw new TypeError('Failed to fetch'); return undefined }],
+  ])('removed, but the day could not be read again (the read %s): the item is gone here too, and a note says the page could not refresh', async (_name, failing) => {
+    serve(item('DELETE', 200, { day: DAY, key: 'shipped:repo/v0.1.0', removedCount: 3 }), failing())
+    render(<JourneyDay view={view({ removedCount: 2 })} names={NAMES} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Remove Released 0.1.0' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Yes, remove Released 0.1.0' }))
+    await waitFor(() => expect(screen.queryByText('Released 0.1.0')).toBeNull())
+    expect(screen.getByRole('status')).toHaveTextContent('Removed. The page could not refresh. Reload to see the latest.')
+    expect(screen.queryByText(/Not removed/)).toBeNull()
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(screen.getByRole('button', { name: '3 items removed' })).toBeInTheDocument()
+    // The account may tell of what was just removed, and the server withholds it; so does the page.
+    expect(screen.queryByText('Ada and Bo planned the week.')).toBeNull()
+    expect(screen.getByText('The account of this day is being written again.')).toBeInTheDocument()
+    expect(screen.getByText('Weekly sync')).toBeInTheDocument()
+  })
+
+  it('removed with a 409 and no fresh read: gone here, in the server words, with the note that the page could not refresh', async () => {
+    serve(item('DELETE', 409, { removed: true, error: 'Removed, but search could not be updated. Try again.' }))
+    render(<JourneyDay view={view({ account: null })} names={NAMES} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Remove Released 0.1.0' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Yes, remove Released 0.1.0' }))
+    await waitFor(() => expect(screen.queryByText('Released 0.1.0')).toBeNull())
+    expect(screen.getByRole('status')).toHaveTextContent('Removed, but search could not be updated. Try again. The page could not refresh. Reload to see the latest.')
+    expect(screen.getByRole('button', { name: '1 item removed' })).toBeInTheDocument()
+    expect(screen.getByText('This day has not been written up yet.')).toBeInTheDocument()
+  })
+
+  it('a second tap on Yes, remove while the first is on its way sends nothing more', async () => {
+    let answer: (res: Response) => void = () => {}
+    const fetchSpy = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === 'DELETE') return new Promise<Response>((resolve) => { answer = resolve })
+      return Promise.resolve(Response.json(without('shipped:repo/v0.1.0', 1)))
+    })
+    vi.stubGlobal('fetch', fetchSpy)
+    render(<JourneyDay view={view()} names={NAMES} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Remove Released 0.1.0' }))
+    const yes = screen.getByRole('button', { name: 'Yes, remove Released 0.1.0' })
+    fireEvent.click(yes)
+    expect(yes).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Keep Released 0.1.0' })).toBeDisabled()
+    fireEvent.click(yes)
+    fireEvent.click(yes)
+    expect(fetchSpy.mock.calls.filter(([, init]) => init?.method === 'DELETE')).toHaveLength(1)
+    answer(new Response('{}'))
+    await waitFor(() => expect(screen.queryByText('Released 0.1.0')).toBeNull())
+    expect(fetchSpy.mock.calls.filter(([, init]) => init?.method === 'DELETE')).toHaveLength(1)
+  })
+
+  it('moves focus to Keep when it asks, and back to Remove when the person keeps the item', () => {
+    serve()
+    render(<JourneyDay view={view()} names={NAMES} />)
+    expect(document.body).toHaveFocus()
+    fireEvent.click(screen.getByRole('button', { name: 'Remove Released 0.1.0' }))
+    expect(screen.getByRole('button', { name: 'Keep Released 0.1.0' })).toHaveFocus()
+    fireEvent.click(screen.getByRole('button', { name: 'Keep Released 0.1.0' }))
+    expect(screen.getByRole('button', { name: 'Remove Released 0.1.0' })).toHaveFocus()
+  })
+
+  it('gives focus back to Remove when a removal fails, so the note is read where the person is', async () => {
+    serve(item('DELETE', 500))
+    render(<JourneyDay view={view()} names={NAMES} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Remove Released 0.1.0' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Yes, remove Released 0.1.0' }))
+    await screen.findByRole('alert')
+    expect(screen.getByRole('button', { name: 'Remove Released 0.1.0' })).toHaveFocus()
+  })
+
+  it('every control is named by what it shows: its accessible name contains its visible words', async () => {
+    serve(removedList(REMOVED))
+    render(<JourneyDay view={view({ removedCount: 2 })} names={NAMES} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Remove Released 0.1.0' }))
+    fireEvent.click(screen.getByRole('button', { name: '2 items removed' }))
+    await screen.findByRole('button', { name: 'Restore Photo' })
+    const named = screen.getAllByRole('button').filter((b) => b.hasAttribute('aria-label') && b.getAttribute('aria-label') !== 'Close')
+    expect(named.map((b) => b.textContent)).toEqual(expect.arrayContaining(['Remove', 'Yes, remove', 'Keep', 'Restore']))
+    for (const b of named) expect(b.getAttribute('aria-label')!.startsWith(`${b.textContent} `), b.getAttribute('aria-label')!).toBe(true)
   })
 
   it('asks once before removing, and Keep leaves the item alone', () => {
@@ -170,7 +325,7 @@ describe('JourneyDay', () => {
 
   it('opens what was removed: a title or a kind, who removed it and when, and nothing of the media', async () => {
     serve(removedList(REMOVED))
-    const { container } = render(<JourneyDay view={without('shipped:repo/v0.1.0', 2)} names={NAMES} />)
+    render(<JourneyDay view={without('shipped:repo/v0.1.0', 2)} names={NAMES} />)
     fireEvent.click(screen.getByRole('button', { name: '2 items removed' }))
     const sheet = await screen.findByRole('dialog', { name: 'Removed from this day' })
     expect(await within(sheet).findByText('Released 0.1.0')).toBeInTheDocument()
@@ -178,7 +333,6 @@ describe('JourneyDay', () => {
     expect(within(sheet).getByText(/Removed by Ada/)).toHaveTextContent(/^Photo · Removed by Ada · /)
     expect(within(sheet).getByRole('button', { name: 'Restore Photo' })).toBeInTheDocument()
     expect(sheet.querySelector('img, video')).toBeNull()
-    expect(container).toBeTruthy()
   })
 
   it('restores an item from the list, closes the list and draws the day again', async () => {
@@ -193,14 +347,64 @@ describe('JourneyDay', () => {
     expect(refresh).toHaveBeenCalledTimes(1)
   })
 
-  it('says so when a restore does not go through, and keeps the list open', async () => {
+  it('says so on the row when a restore does not go through, and keeps the list open', async () => {
     serve(removedList(REMOVED), item('POST', 500))
     render(<JourneyDay view={without('shipped:repo/v0.1.0', 2)} names={NAMES} />)
     fireEvent.click(screen.getByRole('button', { name: '2 items removed' }))
     fireEvent.click(await screen.findByRole('button', { name: 'Restore Released 0.1.0' }))
     expect(await screen.findByText('Not restored. Try again.')).toBeInTheDocument()
+    expect(within(screen.getByRole('button', { name: 'Restore Released 0.1.0' }).closest('li') as HTMLElement).getByRole('alert')).toHaveTextContent('Not restored. Try again.')
+    expect(within(screen.getByRole('button', { name: 'Restore Photo' }).closest('li') as HTMLElement).queryByRole('alert')).toBeNull()
     expect(screen.getByRole('dialog')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Restore Released 0.1.0' })).toBeEnabled()
+  })
+
+  it('a restore shows the server own words, and says signed out for a 401 or a 403 with none', async () => {
+    serve(removedList(REMOVED), (url, m) => (m === 'POST' && url.includes('shipped') ? new Response(JSON.stringify({ error: 'no such item on this day' }), { status: 404 }) : undefined), item('POST', 401))
+    render(<JourneyDay view={without('shipped:repo/v0.1.0', 2)} names={NAMES} />)
+    fireEvent.click(screen.getByRole('button', { name: '2 items removed' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Restore Released 0.1.0' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('no such item on this day')
+    fireEvent.click(screen.getByRole('button', { name: 'Restore Photo' }))
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('You are signed out. Reload to sign in again.'))
+    expect(screen.getByRole('alert')).not.toHaveTextContent(/try again/i)
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+  })
+
+  it('restored, but the day could not be read again: the list closes, the count drops, and a note says the page could not refresh', async () => {
+    const unhandled = vi.fn()
+    window.addEventListener('unhandledrejection', unhandled)
+    process.on('unhandledRejection', unhandled)
+    serve(removedList(REMOVED), item('POST', 200, { day: DAY, key: 'shipped:repo/v0.1.0', removedCount: 1 }), (url, m) => { if (m === 'GET' && url === API) throw new TypeError('Failed to fetch'); return undefined })
+    render(<JourneyDay view={without('shipped:repo/v0.1.0', 2)} names={NAMES} />)
+    fireEvent.click(screen.getByRole('button', { name: '2 items removed' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Restore Released 0.1.0' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect(await screen.findByRole('status')).toHaveTextContent('Restored. The page could not refresh. Reload to see it.')
+    expect(screen.getByRole('button', { name: '1 item removed' })).toBeInTheDocument()
+    expect(screen.queryByText(/Not restored/)).toBeNull()
+    await new Promise((r) => setTimeout(r, 10))
+    window.removeEventListener('unhandledrejection', unhandled)
+    process.off('unhandledRejection', unhandled)
+    expect(unhandled).not.toHaveBeenCalled()
+  })
+
+  it('a second tap on Restore while the first is on its way sends nothing more', async () => {
+    let answer: (res: Response) => void = () => {}
+    const fetchSpy = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === 'POST') return new Promise<Response>((resolve) => { answer = resolve })
+      return Promise.resolve(String(input).endsWith('/removed') ? Response.json({ removed: REMOVED }) : Response.json(view({ removedCount: 1 })))
+    })
+    vi.stubGlobal('fetch', fetchSpy)
+    render(<JourneyDay view={without('shipped:repo/v0.1.0', 2)} names={NAMES} />)
+    fireEvent.click(screen.getByRole('button', { name: '2 items removed' }))
+    const restore = await screen.findByRole('button', { name: 'Restore Released 0.1.0' })
+    fireEvent.click(restore)
+    expect(restore).toBeDisabled()
+    fireEvent.click(restore)
+    answer(new Response('{}'))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect(fetchSpy.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(1)
   })
 
   it('says so when the list does not load', async () => {

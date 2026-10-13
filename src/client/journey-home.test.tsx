@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render as renderBare, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render as renderBare, screen, waitFor, within } from '@testing-library/react'
 import type { ReactElement } from 'react'
 import { JourneyHome } from './journey-home.js'
 import { JourneyProvider } from './provider.js'
@@ -40,6 +40,15 @@ describe('JourneyHome', () => {
     render(<JourneyHome days={[BARE, ONE]} next={null} />)
     expect(screen.getByText('3 items, not written up yet')).toBeInTheDocument()
     expect(screen.getByText('1 item, not written up yet')).toBeInTheDocument()
+  })
+
+  it('says how many items are on every day, written up or not', () => {
+    render(<JourneyHome days={[WRITTEN, BARE, { ...ONE, firstLine: 'One thing happened.' }]} next={null} />)
+    const links = screen.getAllByRole('link')
+    expect(links[0]).toHaveTextContent('Ada and Bo planned the week.')
+    expect(within(links[0]).getByText('6 items')).toBeInTheDocument()
+    expect(within(links[1]).getByText('3 items, not written up yet')).toBeInTheDocument()
+    expect(within(links[2]).getByText('1 item')).toBeInTheDocument()
   })
 
   it('marks the days the app says are new', () => {

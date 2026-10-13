@@ -6,10 +6,10 @@ import type { DayRow, DaysPage } from '../types.js'
 import { formatDay } from '../format.js'
 import { useJourney } from './context.js'
 
-const countLine = (n: number) => `${n} ${n === 1 ? 'item' : 'items'}, not written up yet`
+const itemsLine = (n: number) => `${n} ${n === 1 ? 'item' : 'items'}`
 
-// The list of days, newest first: the date, the first line of the day's account, and a strip of
-// that day's media. The app hands in the first page it read on the server; earlier pages are
+// The list of days, newest first: the date, the first line of the day's account, how many items
+// the day holds (on every row, written up or not), and a strip of that day's media. The app hands in the first page it read on the server; earlier pages are
 // fetched here by the date cursor. Which days are new to this person is the app's to know, so it
 // arrives as `newDays`. No row prefetches its page: each is a dynamic render with signed media.
 export function JourneyHome({ days, next, newDays = [], empty = 'Nothing here yet. A day appears once something from it is contributed.' }: {
@@ -52,7 +52,14 @@ export function JourneyHome({ days, next, newDays = [], empty = 'Nothing here ye
                 <span>{formatDay(d.day, now)}</span>
                 {newDays.includes(d.day) && <span aria-label="New" role="img" className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: theme.accent }} />}
               </p>
-              <p className="mt-1 text-[17px] leading-snug" style={{ color: theme.ink, fontFamily: theme.serif }}>{d.firstLine ?? countLine(d.count)}</p>
+              {d.firstLine === null ? (
+                <p className="mt-1 text-[17px] leading-snug" style={{ color: theme.ink, fontFamily: theme.serif }}>{`${itemsLine(d.count)}, not written up yet`}</p>
+              ) : (
+                <>
+                  <p className="mt-1 text-[17px] leading-snug" style={{ color: theme.ink, fontFamily: theme.serif }}>{d.firstLine}</p>
+                  <p className="mt-1 text-xs" style={{ color: theme.muted }}>{itemsLine(d.count)}</p>
+                </>
+              )}
               {d.thumbs.length > 0 && (
                 <ul className="mt-3 grid grid-cols-4 gap-1.5">
                   {d.thumbs.map((src, i) => (
