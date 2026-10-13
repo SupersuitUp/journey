@@ -1,10 +1,12 @@
 import 'server-only'
 import { RuleError, isRuleError } from '../errors.js'
+import { setAccountOn, validateAccount, validateBasedOn } from '../account-rules.js'
 import { dayHash } from '../day-hash.js'
 import { assertTimeZone, localStamp, validateDay } from '../day-rules.js'
 import { contributeTo, emptyDay, wantsMedia } from '../day.js'
-import { checkBatch, itemMediaOf } from '../item-rules.js'
-import type { ContributeAnswer, ContributeResult, DayRecord, ItemMedia, MediaRecord, NewItem, NewMedia } from '../types.js'
+import { checkBatch, itemMediaOf, validateKey } from '../item-rules.js'
+import { removeFrom, removedOf, restoreIn } from '../removal.js'
+import type { ContributeAnswer, ContributeResult, DayRecord, ItemMedia, MediaRecord, NewItem, NewMedia, RemovedRow } from '../types.js'
 import type { Destination, JourneyHost } from './host.js'
 
 const nowIso = () => new Date().toISOString()
@@ -117,7 +119,80 @@ export function createJourneyStore<M extends string>(host: JourneyHost<M>) {
     return { day, hash: out.hash, results: out.results, refused: out.results.filter((r) => r.status === 'refused').map((r) => r.key) }
   }
 
-  return { contribute }
+  /**
+   * Either member removes any item. The item is hidden, never deleted, and search has forgotten it
+   * by the time this answers. Removing what is already removed changes nothing and asks search to
+   * forget again, so a forget that failed the first time gets a second try.
+   */
+  async function remove(m: M, dayRaw: unknown, keyRaw: unknown): Promise<{ day: string; key: string; removedCount: number }> {
+    const day = validateDay(dayRaw)
+    const key = validateKey(keyRaw)
+    const ref = days().doc(day)
+    const now = nowIso()
+    const out = await host.db().runTransaction(async (tx) => {
+      const doc = await tx.get(ref)
+      if (!doc.exists) throw new RuleError('no such day', 404)
+      const step = removeFrom(doc.data() as DayRecord<M>, m, key, now)
+      if (step.changed) tx.set(ref, { ...step.rec })
+      return { key: step.key, hadAccount: step.hadAccount, removedCount: removedOf(step.rec).length }
+    })
+    await settle('forget item', () => host.forget?.item(day, out.key))
+    if (out.hadAccount) await settle('forget day', () => host.forget?.day?.(day))
+    return { day, key: out.key, removedCount: out.removedCount }
+  }
+
+  /** Either member puts a removed item back. `m` is who asked; nothing is recorded about a restore. */
+  async function restore(m: M, dayRaw: unknown, keyRaw: unknown): Promise<{ day: string; key: string; removedCount: number }> {
+    void m
+    const day = validateDay(dayRaw)
+    const key = validateKey(keyRaw)
+    const ref = days().doc(day)
+    const now = nowIso()
+    const out = await host.db().runTransaction(async (tx) => {
+      const doc = await tx.get(ref)
+      if (!doc.exists) throw new RuleError('no such day', 404)
+      const step = restoreIn(doc.data() as DayRecord<M>, key, now)
+      if (step.changed) tx.set(ref, { ...step.rec })
+      return { key: step.key, changed: step.changed, removedCount: removedOf(step.rec).length }
+    })
+    if (out.changed) quietly('index item', () => host.index?.item(day, out.key))
+    return { day, key: out.key, removedCount: out.removedCount }
+  }
+
+  /** What was removed from a day: its key, its kind, its title when it has one, who and when. */
+  async function removed(dayRaw: unknown): Promise<RemovedRow<M>[]> {
+    const day = validateDay(dayRaw)
+    const doc = await days().doc(day).get()
+    if (!doc.exists) throw new RuleError('no such day', 404)
+    return removedOf(doc.data() as DayRecord<M>)
+  }
+
+  /**
+   * Sets a day's account. `basedOn` is the hash the writer read the day with; if the day has
+   * moved since, the answer is a 409 carrying the hash to read again from. The first account a day
+   * ever gets is the one moment anyone is told. Two machines writing the same day at once are put
+   * in order by the transaction, so exactly one of them is the first.
+   */
+  async function setAccount(m: M, dayRaw: unknown, body: unknown): Promise<{ day: string; hash: string; first: boolean }> {
+    const day = validateDay(dayRaw)
+    const b = (typeof body === 'object' && body !== null ? body : {}) as { text?: unknown; basedOn?: unknown }
+    const text = validateAccount(b.text)
+    const basedOn = validateBasedOn(b.basedOn)
+    const ref = days().doc(day)
+    const now = nowIso()
+    const out = await host.db().runTransaction(async (tx) => {
+      const doc = await tx.get(ref)
+      if (!doc.exists) throw new RuleError('no such day', 404)
+      const step = setAccountOn(doc.data() as DayRecord<M>, m, text, basedOn, now)
+      tx.set(ref, { ...step.rec })
+      return { first: step.first, hash: basedOn }
+    })
+    quietly('index day', () => host.index?.day(day))
+    if (out.first) quietly('announce dayWritten', () => host.announce.dayWritten(day, m))
+    return { day, hash: out.hash, first: out.first }
+  }
+
+  return { contribute, remove, restore, removed, setAccount }
 }
 
 export type JourneyStore<M extends string> = ReturnType<typeof createJourneyStore<M>>
