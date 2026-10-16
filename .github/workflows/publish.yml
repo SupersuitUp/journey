@@ -50,6 +50,7 @@ jobs:
     # The FIRST publish of a new package cannot go through this workflow: npm attaches a
     # trusted publisher to an existing package, so the first version is published by hand (web 2FA)
     # and the record created right after. Every release since is a tag push.
+    environment: blank
     steps:
       - uses: actions/checkout@v5
 
