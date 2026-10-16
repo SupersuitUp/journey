@@ -42,6 +42,7 @@ export async function itemView<M extends string>(item: Item<M>, sign: Sign): Pro
     ...(item.line ? { line: item.line } : {}),
     summaries,
     ...(item.words ? { words: item.words } : {}),
+    ...(item.from ? { from: item.from } : {}),
     ...(item.others ? { others: true as const } : {}),
     ...(item.media ? { media: await mediaView(item.media, sign) } : {}),
   }
@@ -97,6 +98,7 @@ export function agentDayOf<M extends string>(day: string, rec: DayRecord<M> | nu
     ...(i.line ? { line: i.line } : {}),
     ...(i.summaries ? { summaries: i.summaries } : {}),
     ...(i.words ? { words: i.words } : {}),
+    ...(i.from ? { from: i.from } : {}),
     ...(i.others ? { others: true as const } : {}),
     ...(i.meetingKey ? { meetingKey: i.meetingKey } : {}),
     hasMedia: i.media !== undefined,
@@ -127,6 +129,7 @@ export function searchDayOf<M extends string>(rec: DayRecord<M> | null): SearchD
     ...(i.line ? { line: i.line } : {}),
     ...(i.summaries ? { summaries: i.summaries } : {}),
     ...(i.words ? { words: i.words } : {}),
+    ...(i.from ? { from: i.from } : {}),
     ...(i.media?.thumbPath ? { thumbPath: i.media.thumbPath } : {}),
   }))
   const shown = rec.account && !rec.accountWithheld && rec.accountOwesForget === undefined && items.length > 0

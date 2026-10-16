@@ -36,6 +36,8 @@ export interface Removal<M extends string = string> { by: M; at: string }
 // `owesForget` is set when search may still hold what this item no longer shows (it was removed,
 // or it lost its summaries and recording), and stays until search confirms it has forgotten. Its
 // value is when the debt was taken, so a confirmation of an older debt never clears a newer one.
+// `from` is who wrote a text, when the machine that sent it said: `by` is only whose machine sent
+// it, and one machine sends both people's messages from the thread they share.
 export interface Item<M extends string = string> {
   key: string
   aka?: string[]
@@ -46,6 +48,7 @@ export interface Item<M extends string = string> {
   line?: string
   summaries?: Partial<Record<M, string>>
   words?: string
+  from?: M
   others?: true
   meetingKey?: string
   media?: ItemMedia
@@ -75,9 +78,11 @@ export interface DayRecord<M extends string = string> {
 
 // What a machine sends for one item. `media.uploadId` is the id an upload ticket gave.
 export interface NewMedia { uploadId: string; kind: MediaKind; durationSec?: number; width?: number; height?: number }
+// `from` is for a text: "me" when the sending member wrote it, "other" when the other member did.
+export type TextFrom = 'me' | 'other'
 export interface NewItem {
   key: string; kind: ItemKind; at: string
-  title?: string; line?: string; summary?: string; words?: string
+  title?: string; line?: string; summary?: string; words?: string; from?: TextFrom
   others?: true; meetingKey?: string; media?: NewMedia
 }
 
@@ -104,7 +109,7 @@ export interface ItemView<M extends string = string> {
   key: string; kind: ItemKind; at: string; by: M[]
   title?: string; line?: string
   summaries: { by: M; text: string }[]
-  words?: string; others?: true; media?: MediaView
+  words?: string; from?: M; others?: true; media?: MediaView
 }
 export type GroupName = 'calls' | 'media' | 'texts' | 'shipped'
 export interface DayGroup<M extends string = string> { name: GroupName; items: ItemView<M>[] }
@@ -123,7 +128,7 @@ export interface RemovedRow<M extends string = string> { key: string; kind: Item
 // What the session that writes the account is handed: words and facts, never a signed URL.
 export interface AgentItem<M extends string = string> {
   key: string; aka?: string[]; kind: ItemKind; at: string; by: M[]
-  title?: string; line?: string; summaries?: Partial<Record<M, string>>; words?: string
+  title?: string; line?: string; summaries?: Partial<Record<M, string>>; words?: string; from?: M
   others?: true; meetingKey?: string
   hasMedia: boolean; mediaKind?: MediaKind
 }
@@ -142,6 +147,6 @@ export interface AgentDay<M extends string = string> {
 // that search still owes a forget for is left out, as a removed item and a withheld account are.
 export interface SearchItem<M extends string = string> {
   key: string; kind: ItemKind; at: string; by: M[]
-  title?: string; line?: string; summaries?: Partial<Record<M, string>>; words?: string; thumbPath?: string
+  title?: string; line?: string; summaries?: Partial<Record<M, string>>; words?: string; from?: M; thumbPath?: string
 }
 export interface SearchDay<M extends string = string> { day: string; items: SearchItem<M>[]; account?: string }

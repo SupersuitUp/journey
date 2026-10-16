@@ -1,6 +1,6 @@
 {
   "name": "@supersuit/journey",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Journey: a private timeline of days. Each person's machine contributes calls, photos, video, texts and shipped work to a day, an account is written from what is there, and anyone in the app can remove any item. Rules, a Firestore store, Next.js route handlers and React screens, for any app that says who the people are and where things are kept.",
   "type": "module",
   "exports": {

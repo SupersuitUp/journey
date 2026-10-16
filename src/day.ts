@@ -124,8 +124,9 @@ function refuseTwin<M extends string>(rec: DayRecord<M>, twin: Item<M>, item: Ne
  * call and says others were present, the removed call is narrowed where it lies). The same call
  * from the other machine: merged.
  * Otherwise added. `media` is what the app's pipeline filed for this item, if it carried an upload.
+ * `from` is the member who wrote a text, already resolved from the item's "me" or "other".
  */
-export function contributeTo<M extends string>(rec: DayRecord<M>, m: M, item: NewItem, media: ItemMedia | undefined, now: string): Step<M> {
+export function contributeTo<M extends string>(rec: DayRecord<M>, m: M, item: NewItem, media: ItemMedia | undefined, now: string, from?: M): Step<M> {
   const known = findItem(rec, item.key)
   if (known?.removed) return still(rec, { key: item.key, status: 'refused', reason: REMOVED_REASON })
   if (known) return still(rec, { key: item.key, status: 'present' })
@@ -139,6 +140,7 @@ export function contributeTo<M extends string>(rec: DayRecord<M>, m: M, item: Ne
     ...(item.line ? { line: item.line } : {}),
     ...(item.summary ? { summaries: said(m, item.summary) } : {}),
     ...(item.words ? { words: item.words } : {}),
+    ...(from && item.kind === 'text' ? { from } : {}),
     ...(item.others ? { others: true as const } : {}),
     ...(item.meetingKey ? { meetingKey: item.meetingKey } : {}),
     ...(media ? { media } : {}),

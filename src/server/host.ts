@@ -20,6 +20,11 @@ export interface JourneyHost<M extends string> {
   collection: string
   /** The list filed uploads are kept in: one record per upload, its id the upload's own id. Not `collection`. */
   mediaCollection: string
+  /**
+   * Every member, so a text a machine says the OTHER member wrote can be filed under them. Without
+   * it, such a text is answered `invalid` and a text from the sending member still lands.
+   */
+  members?: readonly M[]
   /** The one zone a day is counted in, for everyone, for example 'America/Chicago'. */
   timeZone: string
   /**

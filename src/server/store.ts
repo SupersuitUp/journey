@@ -31,11 +31,18 @@ export function assertHostFits<M extends string>(host: JourneyHost<M>): void {
 
 // Journey at the edge: read a day, call one rule, write the day, then tell the host. Every
 // decision is in the root files (day.ts, removal.ts, account-rules.ts).
+const NO_OTHER = 'this app does not list its two members, so a text cannot say the other one wrote it'
+
 export function createJourneyStore<M extends string>(host: JourneyHost<M>) {
   assertHostFits(host)
   const days = () => host.db().collection(host.collection)
   const mediaDocs = () => host.db().collection(host.mediaCollection)
   const refusal = (err: unknown) => isRuleError(err) || host.isRefusal?.(err) === true
+  // The one member who is not `m`, when the app lists its members and there is exactly one.
+  const otherOf = (m: M): M | undefined => {
+    const rest = (host.members ?? []).filter((x) => x !== m)
+    return rest.length === 1 ? rest[0] : undefined
+  }
   const failed = (what: string, err: unknown) => { try { host.log?.(`journey: ${what} failed`, err) } catch { /* a log that throws is dropped too */ } }
   // A hook that is not waited for: the write is saved, so its failure must never become the answer.
   const quietly = (what: string, run: () => unknown) => {
@@ -168,7 +175,9 @@ export function createJourneyStore<M extends string>(host: JourneyHost<M>) {
       let dirty = false
       for (const [i, c] of checked.entries()) {
         if (!c.item || whyAt[i] !== undefined) { results.push({ index: i, key: c.key, status: 'invalid', reason: whyAt[i] ?? 'refused' }); continue }
-        const step = contributeTo(rec, m, c.item, filedAt[i], now)
+        const from = c.item.from === 'me' ? m : c.item.from === 'other' ? otherOf(m) : undefined
+        if (c.item.from === 'other' && !from) { results.push({ index: i, key: c.key, status: 'invalid', reason: NO_OTHER }); continue }
+        const step = contributeTo(rec, m, c.item, filedAt[i], now, from)
         // An item that would push the record past its size is left out, and the rest still land.
         // A narrowing is never left out: it takes words and a recording away, and must not wait for room.
         if (step.rec !== rec && !step.narrowed && dayBytes(step.rec) > DAY_MAX_BYTES) {

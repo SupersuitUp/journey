@@ -70,6 +70,25 @@ describe('contribute', () => {
     expect(Object.keys(stored().items)).toEqual(['shipped:r1'])
   })
 
+  it('a text names who wrote it: the sending member, or the other one the app lists', async () => {
+    const h = fakeHost()
+    const store = createJourneyStore({ ...h.host, members: ['ada', 'bo'] })
+    const stored = () => h.f.raw('journey', DAY) as unknown as DayRecord<M>
+    const answer = await store.contribute('ada', DAY, { items: [{ ...TEXT, from: 'other' }, { ...TEXT, key: 'messages:t2', from: 'me' }, { ...TEXT, key: 'messages:t3' }] })
+    expect(answer.results.map((r) => r.status)).toEqual(['added', 'added', 'added'])
+    expect(stored().items['messages:t1']).toMatchObject({ by: ['ada'], from: 'bo' })
+    expect(stored().items['messages:t2']).toMatchObject({ by: ['ada'], from: 'ada' })
+    expect(stored().items['messages:t3'].from).toBeUndefined()
+  })
+
+  it('a text from the other member is invalid when the app does not list its members, and the rest land', async () => {
+    const { store, stored } = setup()
+    const answer = await store.contribute('ada', DAY, { items: [{ ...TEXT, from: 'other' }, SHIPPED] })
+    expect(answer.results[0]).toMatchObject({ status: 'invalid', reason: expect.stringMatching(/members/) })
+    expect(answer.results[1].status).toBe('added')
+    expect(stored().items['messages:t1']).toBeUndefined()
+  })
+
   it('two machines contribute to one day', async () => {
     const { store, stored } = setup()
     await store.contribute('ada', DAY, { items: [SHIPPED] })

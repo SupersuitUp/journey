@@ -102,7 +102,7 @@ function ItemRow({ item, names, busy, confirming, note, onAsk, onKeep, onRemove 
             </p>
           ))}
           {item.media && <Media media={item.media} label={label} />}
-          <p className="mt-1 text-xs" style={{ color: theme.muted }}>{`${fromLine(item.by, names)}${item.others ? ' · Others were present' : ''}`}</p>
+          <p className="mt-1 text-xs" style={{ color: theme.muted }}>{`${fromLine(item.from ? [item.from] : item.by, names)}${item.others ? ' · Others were present' : ''}`}</p>
         </div>
         {confirming ? (
           <div className="flex shrink-0 flex-col items-end">

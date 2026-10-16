@@ -90,6 +90,13 @@ describe('JourneyDay', () => {
     expect(within(screen.getByRole('region', { name: 'Texts' })).getByText('From Bo')).toBeInTheDocument()
   })
 
+  it('a text is marked with who wrote it when it says, whoever\'s machine sent it', () => {
+    const v = view()
+    v.groups = v.groups.map((g) => g.name === 'texts' ? { ...g, items: [{ ...TEXT, by: ['ada'], from: 'bo' }] } : g)
+    render(<JourneyDay view={v} names={NAMES} />)
+    expect(within(screen.getByRole('region', { name: 'Texts' })).getByText('From Bo')).toBeInTheDocument()
+  })
+
   it('shows a call with both sets of notes, each under its contributor name', () => {
     render(<JourneyDay view={view()} names={NAMES} />)
     expect(screen.getByText('Notes from the first machine.')).toHaveTextContent('Ada: Notes from the first machine.')

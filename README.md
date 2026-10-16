@@ -71,8 +71,13 @@ ASCII characters with no spaces.
 | `call` with `others: true` | `title` | `line`, `meetingKey`. Never a summary or media. |
 | `photo` | `media` (a photo) | `title` |
 | `video` | `media` (a video) | `title` |
-| `text` | `words` | `title` |
+| `text` | `words` | `title`, `from` |
 | `shipped` | `title` | |
+
+A text's `from` says who wrote it: `"me"` (the member whose machine sends it) or `"other"` (the
+other member, which needs the host's `members`). It is stored as that member's key and shown as
+the text's author; without it, a text is shown as from whose machine sent it, which is wrong for
+the other person's half of a shared thread.
 
 Lengths: `title` and `line` 200, `summary` 1,200, `words` 600, the account 6,000.
 
@@ -93,6 +98,8 @@ its JSDoc. `createJourneyStore` checks the host when the app starts and throws, 
 part, rather than failing on a person's first tap. In short:
 
 - `member(req)` says who is asking, or `null`. **The host enforces membership.**
+- `members` (optional): every member's key, so a text sent with `from: "other"` is filed under
+  the other member. Without it such a text is answered `invalid`.
 - `db()`, `collection` (one record per day) and `mediaCollection` (one record per filed upload,
   under the upload's own id). Two lists, never the same one.
 - `timeZone`: the one zone a day is counted in. **It must be the zone the contributing machines
@@ -152,7 +159,7 @@ narrowed a call reports that row `failed`, and sending it again is what asks sea
 const found = await journey.searchDay('2031-04-05')
 // null when nothing was ever contributed to the day, else:
 // { day: '2031-04-05',
-//   items: [ { key, kind, at, by, title?, line?, summaries?, words?, thumbPath? } ],
+//   items: [ { key, kind, at, by, title?, line?, summaries?, words?, from?, thumbPath? } ],
 //   account?: 'the account text' }
 ```
 
@@ -246,7 +253,7 @@ POST api/journey/agent/days/2031-04-05/items
   { "key": "camera-roll:p1", "kind": "photo", "at": "2031-04-05T15:20:00Z", "media": { "uploadId": "…", "kind": "photo" } },
   { "key": "camera-roll:v1", "kind": "video", "at": "2031-04-05T15:40:00Z",
     "media": { "uploadId": "…", "kind": "video", "durationSec": 62.5, "width": 1920, "height": 1080 } },
-  { "key": "messages:t1", "kind": "text", "at": "2031-04-05T16:30:00Z", "words": "Shipping it today." },
+  { "key": "messages:t1", "kind": "text", "at": "2031-04-05T16:30:00Z", "words": "Shipping it today.", "from": "other" },
   { "key": "shipped:repo/v1.2.0", "kind": "shipped", "at": "2031-04-05T21:00:00Z", "title": "Released 1.2.0" },
   { "key": " padded", "kind": "shipped", "at": "2031-04-05T21:05:00Z", "title": "A key with a space at its start" }
 ] }

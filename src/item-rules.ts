@@ -86,6 +86,9 @@ export function validateItem(raw: unknown, day: string, timeZone: string): NewIt
     meetingKey = b.meetingKey
   }
   const media = b.media === undefined || b.media === null ? undefined : validateMedia(b.media)
+  if (b.from !== undefined && b.from !== null && b.from !== 'me' && b.from !== 'other') throw new RuleError('from must be "me" or "other"', 400)
+  const from = b.from === 'me' || b.from === 'other' ? b.from : undefined
+  if (from && kind !== 'text') throw new RuleError('from is only for a text', 400)
 
   if (others && media) throw new RuleError('a call with other people present carries no recording', 400)
   if (others && summary) throw new RuleError('a call with other people present carries no summary, only a title and one line', 400)
@@ -109,6 +112,7 @@ export function validateItem(raw: unknown, day: string, timeZone: string): NewIt
     ...(line ? { line } : {}),
     ...(summary ? { summary } : {}),
     ...(words ? { words } : {}),
+    ...(from ? { from } : {}),
     ...(others ? { others: true as const } : {}),
     ...(meetingKey ? { meetingKey } : {}),
     ...(media ? { media } : {}),

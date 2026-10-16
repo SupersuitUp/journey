@@ -2,6 +2,10 @@
 
 Version convention: below 1.0, an addition is a patch and a breaking change is a minor (npm reads `^0.1.2` as 0.1.x only, so an app takes a patch on its own and holds a minor for a person).
 
+## 0.1.1
+
+- **A text says who wrote it.** A contributed text may carry `from: "me"` or `from: "other"`. The item stores the member's key as `from`, the day page shows it as the text's author, and the agent day and `searchDay` carry it. Before this a text was shown as from whose machine sent it, so one machine sending both halves of a shared thread filed the other person's messages as its own. `"other"` resolves through the host's new optional `members`; without them it answers `invalid`, and the rest of the call still lands.
+
 ## 0.1.0
 
 First release.

@@ -55,6 +55,14 @@ describe('mediaView and itemView', () => {
     })
   })
 
+  it('a text carries who wrote it to the page, to the agent and to search', async () => {
+    const rec = contributeTo(emptyDay<M>(DAY, NOW), 'ada', { key: 'messages:t9', kind: 'text', at: '2026-10-12T16:30:00.000Z', words: 'It is live.' }, undefined, NOW, 'bo').rec
+    expect((await itemView(rec.items['messages:t9'], sign)).from).toBe('bo')
+    expect(agentDayOf(DAY, rec, ZONE).items[0]).toMatchObject({ by: ['ada'], from: 'bo' })
+    expect(searchDayOf(rec)!.items[0]).toMatchObject({ by: ['ada'], from: 'bo' })
+    expect((await itemView(day().items['messages:t1'], sign)).from).toBeUndefined()
+  })
+
   it('a call with other people present shows its title and its one line', async () => {
     const view = await itemView(day().items['conversations:a2'], sign)
     expect(view).toEqual({ key: 'conversations:a2', kind: 'call', at: '2026-10-12T18:00:00.000Z', by: ['ada'], title: 'Client call', line: 'Walked through the install.', summaries: [], others: true })

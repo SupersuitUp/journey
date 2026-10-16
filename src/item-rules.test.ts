@@ -96,6 +96,14 @@ describe('validateItem', () => {
     expect(refuses(() => ok({ key: 'shipped:r1', kind: 'shipped', title: 'Released', meetingKey: 'mk-1' }))).toMatch(/meetingKey/)
   })
 
+  it('a text may say who wrote it, as the sending member or the other one, and nothing else may', () => {
+    expect(ok({ key: 'messages:t1', kind: 'text', words: 'hi', from: 'me' }).from).toBe('me')
+    expect(ok({ key: 'messages:t1', kind: 'text', words: 'hi', from: 'other' }).from).toBe('other')
+    expect(ok({ key: 'messages:t1', kind: 'text', words: 'hi' }).from).toBeUndefined()
+    expect(refuses(() => ok({ key: 'messages:t1', kind: 'text', words: 'hi', from: 'bo' }))).toMatch(/from must be "me" or "other"/)
+    expect(refuses(() => ok({ key: 'shipped:r1', kind: 'shipped', title: 'Released', from: 'me' }))).toMatch(/from is only for a text/)
+  })
+
   it('refuses another kind, and a key it cannot keep', () => {
     expect(refuses(() => ok({ key: 'notes:n1', kind: 'note', title: 'x' }))).toMatch(/kind/)
     refuses(() => ok({ key: 'a ', kind: 'shipped', title: 'x' }))
