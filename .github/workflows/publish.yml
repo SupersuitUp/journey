@@ -84,13 +84,9 @@ jobs:
       #
       # Raise this deliberately, after checking that the new major still does the exchange,
       # rather than by floating it.
-      #
-      # PINNED TO THE EXACT VERSION, because a patch broke it too: 11.21.1 (2026-10-15) failed
-      # this exchange with ENEEDAUTH against a correct trust record, where 11.21.0 had published
-      # every @supersuit package the week before.
       - name: Pin npm to a version that performs the OIDC exchange
         run: |
-          npm install -g npm@11.21.0
+          npm install -g npm@11
           npm --version
 
       # The exchange needs these two, injected by GitHub only when `id-token: write` is set
