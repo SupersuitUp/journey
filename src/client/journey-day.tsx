@@ -102,6 +102,13 @@ function ItemRow({ item, names, busy, confirming, note, onAsk, onKeep, onRemove 
             </p>
           ))}
           {item.media && <Media media={item.media} label={label} />}
+          {item.scene && <p className="mt-1 text-[15px] leading-snug" style={{ color: theme.muted }}>{item.scene}</p>}
+          {item.transcript && item.kind === 'video' && (
+            <details className="mt-1 text-[15px] leading-snug" style={{ color: theme.ink }}>
+              <summary className="cursor-pointer" style={{ color: theme.muted }}>Transcript</summary>
+              <p className="mt-1 whitespace-pre-wrap">{item.transcript}</p>
+            </details>
+          )}
           <p className="mt-1 text-xs" style={{ color: theme.muted }}>{`${fromLine(item.from ? [item.from] : item.by, names)}${item.others ? ' · Others were present' : ''}`}</p>
         </div>
         {confirming ? (

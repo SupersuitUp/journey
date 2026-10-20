@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { RuleError } from './errors.js'
 import {
-  ITEMS_PER_CALL, KEY_MAX, SUMMARY_MAX, TITLE_MAX, WORDS_MAX, checkBatch, itemMediaOf, validateItem, validateKey, validateMedia,
+  ITEMS_PER_CALL, KEY_MAX, SCENE_MAX, SUMMARY_MAX, TITLE_MAX, TRANSCRIPT_MAX, WORDS_MAX, checkBatch, itemMediaOf, validateItem, validateKey, validateMedia,
 } from './item-rules.js'
 
 const DAY = '2026-10-12'
@@ -84,6 +84,19 @@ describe('validateItem', () => {
     expect(refuses(() => ok({ key: 'camera-roll:p1', kind: 'photo' }))).toMatch(/upload/)
     expect(refuses(() => ok({ key: 'camera-roll:p1', kind: 'photo', media: VIDEO }))).toMatch(/upload/)
     expect(refuses(() => ok({ key: 'camera-roll:v1', kind: 'video', media: PHOTO }))).toMatch(/upload/)
+  })
+
+  it('a photo and a video may carry a scene, a video may carry a transcript, nothing else may carry either', () => {
+    expect(ok({ key: 'camera-roll:p1', kind: 'photo', media: PHOTO, scene: '  Two people at a whiteboard.  ' }).scene).toBe('Two people at a whiteboard.')
+    expect(ok({ key: 'camera-roll:v1', kind: 'video', media: VIDEO, scene: 'A desk.', transcript: 'So the plan is this.' })).toMatchObject({ scene: 'A desk.', transcript: 'So the plan is this.' })
+    expect(ok({ key: 'camera-roll:p1', kind: 'photo', media: PHOTO, scene: '   ' })).not.toHaveProperty('scene')
+    expect(refuses(() => ok({ key: 'camera-roll:p1', kind: 'photo', media: PHOTO, transcript: 'hello' }))).toMatch(/transcript/)
+    expect(refuses(() => ok({ key: 'messages:t1', kind: 'text', words: 'hi', scene: 'A desk.' }))).toMatch(/scene/)
+    expect(refuses(() => ok({ key: 'conversations:c1', kind: 'call', title: 'Sync', transcript: 'hi' }))).toMatch(/transcript/)
+    expect(refuses(() => ok({ key: 'camera-roll:p1', kind: 'photo', media: PHOTO, scene: 'x'.repeat(SCENE_MAX + 1) }))).toMatch(/scene/)
+    expect(refuses(() => ok({ key: 'camera-roll:v1', kind: 'video', media: VIDEO, transcript: 'x'.repeat(TRANSCRIPT_MAX + 1) }))).toMatch(/transcript/)
+    expect(ok({ key: 'camera-roll:v1', kind: 'video', media: VIDEO, transcript: 'x'.repeat(TRANSCRIPT_MAX) }).transcript).toHaveLength(TRANSCRIPT_MAX)
+    expect([SCENE_MAX, TRANSCRIPT_MAX]).toEqual([600, 20000])
   })
 
   it('a text needs its words and a shipped item its title, and neither carries media', () => {

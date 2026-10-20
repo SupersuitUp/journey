@@ -8,6 +8,9 @@ export const TITLE_MAX = 200
 export const LINE_MAX = 200
 export const SUMMARY_MAX = 1200
 export const WORDS_MAX = 600
+// What an on-machine model saw in a photo or video, and what was said in a video.
+export const SCENE_MAX = 600
+export const TRANSCRIPT_MAX = 20000
 export const ITEMS_PER_CALL = 60
 // A day is one record, and a record has a size limit; this is far above any real day.
 export const DAY_MAX_ITEMS = 300
@@ -80,6 +83,8 @@ export function validateItem(raw: unknown, day: string, timeZone: string): NewIt
   const line = oneLine(b.line, 'line', LINE_MAX)
   const summary = prose(b.summary, 'summary', SUMMARY_MAX)
   const words = prose(b.words, 'words', WORDS_MAX)
+  const scene = prose(b.scene, 'scene', SCENE_MAX)
+  const transcript = prose(b.transcript, 'transcript', TRANSCRIPT_MAX)
   let meetingKey: string | undefined
   if (b.meetingKey !== undefined && b.meetingKey !== null) {
     if (typeof b.meetingKey !== 'string' || !MEETING_KEY_RE.test(b.meetingKey)) throw new RuleError('meetingKey must be 1 to 200 characters with no spaces', 400)
@@ -95,6 +100,8 @@ export function validateItem(raw: unknown, day: string, timeZone: string): NewIt
   if (line && !others) throw new RuleError('line is only for a call with other people present', 400)
   if (summary && kind !== 'call') throw new RuleError('summary is only for a call', 400)
   if (words && kind !== 'text') throw new RuleError('words is only for a text', 400)
+  if (scene && kind !== 'photo' && kind !== 'video') throw new RuleError('scene is only for a photo or a video', 400)
+  if (transcript && kind !== 'video') throw new RuleError('transcript is only for a video', 400)
   if (meetingKey && kind !== 'call') throw new RuleError('meetingKey is only for a call', 400)
   if ((kind === 'call' || kind === 'shipped') && !title) throw new RuleError(`a ${kind} needs a title`, 400)
   if (kind === 'text' && !words) throw new RuleError('a text needs words', 400)
@@ -112,6 +119,8 @@ export function validateItem(raw: unknown, day: string, timeZone: string): NewIt
     ...(line ? { line } : {}),
     ...(summary ? { summary } : {}),
     ...(words ? { words } : {}),
+    ...(scene ? { scene } : {}),
+    ...(transcript ? { transcript } : {}),
     ...(from ? { from } : {}),
     ...(others ? { others: true as const } : {}),
     ...(meetingKey ? { meetingKey } : {}),

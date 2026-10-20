@@ -117,6 +117,20 @@ describe('JourneyDay', () => {
     expect(video).toHaveAttribute('poster', 'https://img/poster.jpg')
   })
 
+  it('shows a scene under a photo and a video, and a transcript collapsed under the video only', () => {
+    const photo = { ...PHOTO, scene: 'Two people at a whiteboard.' }
+    const clip = { ...CLIP, scene: 'A desk by a window.', transcript: 'So the plan is this.' }
+    const v = view({ groups: [{ name: 'media', items: [photo, clip] }] })
+    const { container } = render(<JourneyDay view={v} names={NAMES} />)
+    expect(screen.getByText('Two people at a whiteboard.')).toBeInTheDocument()
+    expect(screen.getByText('A desk by a window.')).toBeInTheDocument()
+    const details = container.querySelectorAll('details')
+    expect(details).toHaveLength(1)
+    expect(details[0]).not.toHaveAttribute('open')
+    expect(details[0].querySelector('summary')).toHaveTextContent('Transcript')
+    expect(details[0]).toHaveTextContent('So the plan is this.')
+  })
+
   it('quotes a text moment', () => {
     render(<JourneyDay view={view()} names={NAMES} />)
     expect(screen.getByText('Shipping it today.').tagName).toBe('BLOCKQUOTE')
