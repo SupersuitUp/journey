@@ -283,6 +283,22 @@ describe('a call answers to a bounded number of keys', () => {
   })
 })
 
+describe('a photo or video keeps its scene and transcript', () => {
+  const VIDEO = { id: 'upload-video-1', kind: 'video' as const, width: 1920, height: 1080, thumbPath: 't', displayPath: 'd', videoPath: 'v', durationSec: 60 }
+
+  it('stores them on the item', () => {
+    const step = contributeTo(start(), 'ada', { key: 'camera-roll:v1', kind: 'video', at: AT, media: { uploadId: 'upload-video-1', kind: 'video', durationSec: 60, width: 1920, height: 1080 }, scene: 'A desk.', transcript: 'So the plan.' }, VIDEO, NOW)
+    expect(step.result.status).toBe('added')
+    expect(step.rec.items['camera-roll:v1']).toMatchObject({ scene: 'A desk.', transcript: 'So the plan.' })
+  })
+
+  it('counts toward the size of the day, so the 900 KB cap refuses an item that would pass it', () => {
+    const plain = contributeTo(start(), 'ada', { key: 'camera-roll:v1', kind: 'video', at: AT, media: { uploadId: 'upload-video-1', kind: 'video', durationSec: 60, width: 1920, height: 1080 } }, VIDEO, NOW).rec
+    const withIt = contributeTo(start(), 'ada', { key: 'camera-roll:v1', kind: 'video', at: AT, media: { uploadId: 'upload-video-1', kind: 'video', durationSec: 60, width: 1920, height: 1080 }, transcript: 'x'.repeat(20000) }, VIDEO, NOW).rec
+    expect(dayBytes(withIt) - dayBytes(plain)).toBeGreaterThanOrEqual(20000)
+  })
+})
+
 describe('dayBytes: how much room a day takes as one record', () => {
   it('counts bytes, not characters, and the threshold leaves room under the limit of a record', () => {
     const rec = contributeTo(start(), 'bo', { key: 'messages:t1', kind: 'text', at: AT, words: '€'.repeat(100) }, undefined, NOW).rec

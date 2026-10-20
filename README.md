@@ -35,7 +35,7 @@ sends items):
   an instant falls on;
 - formatters: `formatDay(day)`, `formatWhen(at, now?, timeZone?)`, `fromLine(by, names)`;
 - the statuses: `CONTRIBUTE_STATUSES` and the `ContributeStatus` type;
-- the caps: `KEY_MAX`, `TITLE_MAX`, `LINE_MAX`, `SUMMARY_MAX`, `WORDS_MAX`, `ACCOUNT_MAX`,
+- the caps: `KEY_MAX`, `TITLE_MAX`, `LINE_MAX`, `SUMMARY_MAX`, `WORDS_MAX`, `SCENE_MAX`, `TRANSCRIPT_MAX`, `ACCOUNT_MAX`,
   `ITEMS_PER_CALL`, `DAY_MAX_ITEMS`, `DAY_MAX_BYTES`, `AKA_MAX`, `THUMBS_PER_DAY`,
   `VIDEO_MAX_DURATION_SEC`, `DAYS_PAGE_DEFAULT`, `DAYS_PAGE_MAX`, and `ITEM_KINDS`;
 - every type a caller or an app reads: `NewItem`, `NewMedia`, `ContributeAnswer`,
@@ -69,8 +69,8 @@ ASCII characters with no spaces.
 | --- | --- | --- |
 | `call` | `title` | `summary`, `meetingKey`, `media` (a video) |
 | `call` with `others: true` | `title` | `line`, `meetingKey`. Never a summary or media. |
-| `photo` | `media` (a photo) | `title` |
-| `video` | `media` (a video) | `title` |
+| `photo` | `media` (a photo) | `title`, `scene` |
+| `video` | `media` (a video) | `title`, `scene`, `transcript` |
 | `text` | `words` | `title`, `from` |
 | `shipped` | `title` | |
 
@@ -79,7 +79,15 @@ other member, which needs the host's `members`). It is stored as that member's k
 the text's author; without it, a text is shown as from whose machine sent it, which is wrong for
 the other person's half of a shared thread.
 
-Lengths: `title` and `line` 200, `summary` 1,200, `words` 600, the account 6,000.
+A photo's or video's `scene` is what a model on the contributor's own machine saw in it (a
+sentence or two, kept to 600 characters, `SCENE_MAX`); a video's `transcript` is what was said in
+it (20,000 characters, `TRANSCRIPT_MAX`). A screen shows the scene under the picture and the
+transcript collapsed under the video; the account writer and `searchDay` read both. An item over
+a length, or a transcript on anything but a video, is answered `invalid`. Neither is ever cut to
+fit: a day whose record would pass 900,000 bytes with the item answers that item `invalid`. A
+client older than this version ignores both fields.
+
+Lengths: `title` and `line` 200, `summary` 1,200, `words` 600, `scene` 600, `transcript` 20,000, the account 6,000.
 
 ### Caps
 

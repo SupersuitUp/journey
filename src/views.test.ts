@@ -223,3 +223,22 @@ describe('searchDayOf: the one thing a search index may hold of a day', () => {
     expect(out).not.toHaveProperty('account')
   })
 })
+
+describe('a scene and a transcript travel with the item', () => {
+  const withScene = () => contributeTo(emptyDay<M>(DAY, NOW), 'ada', {
+    key: 'camera-roll:v2', kind: 'video', at: '2026-10-12T15:40:00.000Z', scene: 'A desk by a window.', transcript: 'So the plan is this.',
+    media: { uploadId: 'upload-video-1', kind: 'video', durationSec: 62.5, width: 1920, height: 1080 },
+  }, CLIP, NOW).rec
+
+  it('a member sees both, and an item without them shows neither', async () => {
+    const rec = withScene()
+    expect(await itemView(rec.items['camera-roll:v2'], sign)).toMatchObject({ scene: 'A desk by a window.', transcript: 'So the plan is this.' })
+    expect(await itemView(day().items['camera-roll:p1'], sign)).not.toHaveProperty('scene')
+  })
+
+  it('the writer of the account and the search index read both', () => {
+    const rec = withScene()
+    expect(agentDayOf(DAY, rec, ZONE).items[0]).toMatchObject({ scene: 'A desk by a window.', transcript: 'So the plan is this.' })
+    expect(searchDayOf(rec)!.items[0]).toMatchObject({ scene: 'A desk by a window.', transcript: 'So the plan is this.' })
+  })
+})

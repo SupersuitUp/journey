@@ -140,6 +140,8 @@ export function contributeTo<M extends string>(rec: DayRecord<M>, m: M, item: Ne
     ...(item.line ? { line: item.line } : {}),
     ...(item.summary ? { summaries: said(m, item.summary) } : {}),
     ...(item.words ? { words: item.words } : {}),
+    ...(item.scene ? { scene: item.scene } : {}),
+    ...(item.transcript ? { transcript: item.transcript } : {}),
     ...(from && item.kind === 'text' ? { from } : {}),
     ...(item.others ? { others: true as const } : {}),
     ...(item.meetingKey ? { meetingKey: item.meetingKey } : {}),

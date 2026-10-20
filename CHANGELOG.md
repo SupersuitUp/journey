@@ -2,6 +2,10 @@
 
 Version convention: below 1.0, an addition is a patch and a breaking change is a minor (npm reads `^0.1.2` as 0.1.x only, so an app takes a patch on its own and holds a minor for a person).
 
+## 0.2.0
+
+- **A photo or video carries a scene, a video a transcript.** A contributed photo or video may carry `scene` (what a model on the contributor's own machine saw, up to 600 characters, `SCENE_MAX`), and a video may also carry `transcript` (what was said, up to 20,000 characters, `TRANSCRIPT_MAX`). A transcript on anything but a video, a scene on anything but a photo or video, and either over its length are answered `invalid`. The day page shows the scene under the picture and the transcript collapsed under the video; the agent day and `searchDay` carry both. Neither is ever trimmed: an item that would take the day past 900,000 bytes is answered `invalid`, as before. Older clients ignore both fields. Minor rather than patch because it adds two names to the root entry.
+
 ## 0.1.1
 
 - **A text says who wrote it.** A contributed text may carry `from: "me"` or `from: "other"`. The item stores the member's key as `from`, the day page shows it as the text's author, and the agent day and `searchDay` carry it. Before this a text was shown as from whose machine sent it, so one machine sending both halves of a shared thread filed the other person's messages as its own. `"other"` resolves through the host's new optional `members`; without them it answers `invalid`, and the rest of the call still lands.

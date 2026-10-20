@@ -9,7 +9,7 @@ export type {
 } from './types.js'
 export { DAYS_PAGE_DEFAULT, DAYS_PAGE_MAX, dayIn, validateAt, validateDay } from './day-rules.js'
 export {
-  AKA_MAX, DAY_MAX_ITEMS, ITEMS_PER_CALL, ITEM_KINDS, KEY_MAX, LINE_MAX, SUMMARY_MAX, TITLE_MAX, VIDEO_MAX_DURATION_SEC, WORDS_MAX, validateKey,
+  AKA_MAX, DAY_MAX_ITEMS, ITEMS_PER_CALL, ITEM_KINDS, KEY_MAX, LINE_MAX, SCENE_MAX, SUMMARY_MAX, TITLE_MAX, TRANSCRIPT_MAX, VIDEO_MAX_DURATION_SEC, WORDS_MAX, validateKey,
 } from './item-rules.js'
 export { CONTRIBUTE_STATUSES, DAY_MAX_BYTES } from './day.js'
 export { ACCOUNT_MAX } from './account-rules.js'

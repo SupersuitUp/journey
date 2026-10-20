@@ -12,8 +12,8 @@ describe('the root entry', () => {
   it('exports the refusal, the validators, the formatters, the statuses and the caps, and nothing else', async () => {
     expect(await names('../src/index.js')).toEqual([
       'ACCOUNT_MAX', 'AKA_MAX', 'CONTRIBUTE_STATUSES', 'DAYS_PAGE_DEFAULT', 'DAYS_PAGE_MAX', 'DAY_MAX_BYTES', 'DAY_MAX_ITEMS',
-      'ITEMS_PER_CALL', 'ITEM_KINDS', 'KEY_MAX', 'LINE_MAX', 'RuleError', 'SUMMARY_MAX', 'THUMBS_PER_DAY', 'TITLE_MAX',
-      'VIDEO_MAX_DURATION_SEC', 'WORDS_MAX', 'dayIn', 'formatDay', 'formatWhen', 'fromLine', 'isRuleError', 'validateAt', 'validateDay', 'validateKey',
+      'ITEMS_PER_CALL', 'ITEM_KINDS', 'KEY_MAX', 'LINE_MAX', 'RuleError', 'SCENE_MAX', 'SUMMARY_MAX', 'THUMBS_PER_DAY', 'TITLE_MAX',
+      'TRANSCRIPT_MAX', 'VIDEO_MAX_DURATION_SEC', 'WORDS_MAX', 'dayIn', 'formatDay', 'formatWhen', 'fromLine', 'isRuleError', 'validateAt', 'validateDay', 'validateKey',
     ])
   })
 
